@@ -48,6 +48,10 @@
   <script>
     if ('serviceWorker' in navigator && location.protocol !== 'file:') {
       window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+      // Provjeri ima li nove verzije i kad se aplikacija vrati iz pozadine
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') navigator.serviceWorker.getRegistration().then(r => r && r.update()).catch(() => {});
+      });
       // Kad stigne nova verzija aplikacije, osvježi stranicu (osim ako nešto upravo tipkaš)
       const hadController = !!navigator.serviceWorker.controller;
       navigator.serviceWorker.addEventListener('controllerchange', () => {
