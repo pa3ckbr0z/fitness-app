@@ -1057,7 +1057,11 @@
     const d = ui.draft;
     d.exercises = d.exercises.filter(e => e.name.trim());
     if (!d.exercises.length) { d.exercises = newDraft().exercises; alert('Prvo odaberi predložak ili upiši barem jednu vježbu.'); return; }
-    d.exercises.forEach(e => { if (!e.sets.length) e.sets.push({ reps: '', weight: '' }); });
+    d.exercises.forEach(e => {
+      if (!e.sets.length) e.sets.push({ reps: '', weight: '' });
+      const l = lastSession(e.name);
+      e.sets.forEach((x, i) => { if (!num(x.reps)) x.reps = num(e.sets[i - 1]?.reps) || num(l?.sets[i]?.reps) || num(l?.sets[0]?.reps) || ''; });
+    });
     if (!ui.gym) ui.gym = { ex: 0, set: 0, start: Date.now() };
     ui.gym.ex = Math.min(ui.gym.ex, d.exercises.length - 1);
     gymFirstUndone();
@@ -1086,7 +1090,7 @@
 
   const gymStepper = (f, label, v, step) => `<div class="stepper">
       <button type="button" data-act="gymstep" data-f="${f}" data-d="${-step}" aria-label="Manje">−</button>
-      <label><input type="number" inputmode="decimal" step="any" min="0" data-gf="${f}" value="${esc(v ?? '')}" placeholder="0"><span>${label}</span></label>
+      <label><input type="number" inputmode="decimal" enterkeyhint="done" step="any" min="0" data-gf="${f}" value="${esc(v ?? '')}" placeholder="0"><span>${label}</span></label>
       <button type="button" data-act="gymstep" data-f="${f}" data-d="${step}" aria-label="Više">+</button></div>`;
 
   function renderGym() {
@@ -1136,6 +1140,39 @@
     s[f] = v;
     sets.slice(ui.gym.set + 1).forEach(x => { if (!x.done && String(x[f] ?? '') === String(old ?? '')) x[f] = v; });
     document.querySelectorAll('.gym-set b').forEach((b, i) => { const x = sets[i]; if (x) b.textContent = `${x.reps || '–'} × ${x.weight === '' || x.weight == null ? '–' : fmt(num(x.weight) || 0)}`; });
+  }
+
+  /* „Set gotov”: reagira već na dodir (pointerdown), jer na mobitelu prvi dodir
+     dok je tipkovnica otvorena samo zatvori tipkovnicu i pomakne ekran pa klik promaši. */
+  let gymDoneLock = false;
+  document.addEventListener('pointerdown', (e) => {
+    const b = e.target.closest?.('[data-act="gymdone"]');
+    if (!b || !ui.gym) return;
+    e.preventDefault();
+    gymDoneLock = true; setTimeout(() => { gymDoneLock = false; }, 700);
+    gymDone();
+  });
+
+  function gymDone() {
+    const a = document.activeElement;
+    if (a && a.tagName === 'INPUT') { if (a.dataset.gf) gymSetValue(a.dataset.gf, a.value === '' ? '' : num(a.value)); a.blur(); }
+    const ex = ui.draft.exercises[ui.gym.ex], s = ex.sets[ui.gym.set];
+    if (s.done) { s.done = false; renderGym(); gymPersist(); return; }
+    if (!num(s.reps)) {
+      toast('Upiši broj ponavljanja');
+      document.querySelector('[data-gf="reps"]')?.closest('.stepper')?.classList.add('need');
+      return;
+    }
+    s.done = true;
+    navigator.vibrate?.(60);
+    ex.sets.slice(ui.gym.set + 1).forEach(x => { if (!x.done) { if (x.weight === '' || x.weight == null) x.weight = s.weight; if (!x.reps) x.reps = s.reps; } });
+    const next = ex.sets.findIndex(x => !x.done);
+    if (next >= 0) { ui.gym.set = next; startRest(S().settings.restSec || 90); }
+    else if (ui.gym.ex < ui.draft.exercises.length - 1) {
+      ui.gym.ex++; gymFirstUndone(); startRest(S().settings.restSec || 90);
+      toast(`Sljedeća: ${ui.draft.exercises[ui.gym.ex].name}`);
+    } else toast('Sve vježbe odrađene 💪 — klikni Završi trening');
+    renderGym(); gymPersist();
   }
 
   function gymBanner() {
@@ -1647,22 +1684,7 @@
         gymSetValue(f, Math.max(0, Math.round(((num(s[f]) || 0) + +el.dataset.d) * 100) / 100));
         renderGym(); gymPersist(); return;
       }
-      case 'gymdone': {
-        const ex = ui.draft.exercises[ui.gym.ex], s = ex.sets[ui.gym.set];
-        if (s.done) { s.done = false; renderGym(); gymPersist(); return; }
-        if (!num(s.reps)) { toast('Upiši broj ponavljanja'); return; }
-        s.done = true;
-        navigator.vibrate?.(60);
-        // prenesi težinu/ponavljanja na prazne setove iza
-        ex.sets.slice(ui.gym.set + 1).forEach(x => { if (!x.done) { if (x.weight === '' || x.weight == null) x.weight = s.weight; if (!x.reps) x.reps = s.reps; } });
-        const next = ex.sets.findIndex(x => !x.done);
-        if (next >= 0) { ui.gym.set = next; startRest(S().settings.restSec || 90); }
-        else if (ui.gym.ex < ui.draft.exercises.length - 1) {
-          ui.gym.ex++; gymFirstUndone(); startRest(S().settings.restSec || 90);
-          toast(`Sljedeća: ${ui.draft.exercises[ui.gym.ex].name}`);
-        } else toast('Sve vježbe odrađene 💪 — klikni Završi trening');
-        renderGym(); gymPersist(); return;
-      }
+      case 'gymdone': if (!gymDoneLock) gymDone(); return;
       case 'gymaddset': {
         const sets = ui.draft.exercises[ui.gym.ex].sets, last = sets[sets.length - 1] || { reps: '', weight: '' };
         sets.push({ reps: last.reps, weight: last.weight });
@@ -1798,6 +1820,7 @@
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && document.getElementById('scanner')) { closeScanner(); return; }
+    if (e.key === 'Enter' && e.target.dataset?.gf) { e.preventDefault(); e.target.blur(); return; }
     if (e.target.matches('[data-search="food"]')) {
       const box = document.getElementById('suggest');
       const open = box && !box.hidden && ui.sug.length;
