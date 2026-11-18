@@ -423,5 +423,16 @@ body.gym-on .timer .t-time { font-size: 2rem; }
 .lib-day .wd { font-size: .75rem; color: var(--accent); font-weight: 600; }
 .lib-item .tag { margin-left: 4px; }
 
+/* Uređivač predložaka */
+.te-ex { display: grid; grid-template-columns: 1fr auto; gap: 8px; background: var(--surface-2); border-radius: 12px; padding: 10px; }
+.te-ex + .te-ex { margin-top: 8px; }
+.te-ex .te-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; grid-column: 1 / -1; }
+.te-ex .te-row label { display: flex; align-items: center; gap: 6px; font-size: .82rem; color: var(--muted); }
+.te-ex .te-row input[type=number] { width: 70px; padding: 6px 8px; }
+.te-move { display: flex; gap: 2px; }
+.te-move button { width: 32px; height: 32px; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px; cursor: pointer; }
+.te-move button:disabled { opacity: .3; cursor: default; }
+.chip button.ed { padding: 5px 4px 5px 4px; color: var(--muted); font-weight: 400; }
+
 details summary { cursor: pointer; font-weight: 600; }
 .hint { font-size: .8rem; color: var(--muted); margin-top: 8px; }

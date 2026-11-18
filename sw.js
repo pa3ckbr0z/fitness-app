@@ -1,6 +1,6 @@
 /* Service worker: aplikacija radi i bez interneta.
    Kad mijenjaš datoteke aplikacije, povećaj VERSION da se nova verzija preuzme. */
-const VERSION = 'v15';
+const VERSION = 'v16';
 const CACHE = 'moj-napredak-' + VERSION;
 const FILES = [
   './',

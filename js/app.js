@@ -219,6 +219,68 @@
 
   const WD = ['Ned', 'Pon', 'Uto', 'Sri', 'Čet', 'Pet', 'Sub'];
 
+  /* ---------- Uređivač predložaka ---------- */
+  function deleteTemplate(id) {
+    const st = S();
+    st.templates = st.templates.filter(t => t.id !== id);
+    const prog = { ...(st.settings.program || {}) };
+    for (const [wd, tid] of Object.entries(prog)) if (tid === id) delete prog[wd];
+    st.settings.program = prog;
+  }
+
+  function openTplEditor(t, copy = false) {
+    ui.tplEdit = {
+      id: copy ? null : (t?.id || null),
+      name: t ? (copy ? `${t.name} (kopija)` : t.name) : '',
+      type: t?.type || 'Snaga', duration: t?.duration || '', notes: t?.notes || '',
+      exercises: (t?.exercises || [{ name: '', sets: [{ reps: 10, weight: '' }, { reps: 10, weight: '' }, { reps: 10, weight: '' }] }])
+        .map(e => ({ name: e.name, sets: e.sets.length, reps: num(e.sets[0]?.reps) || '', bw: e.sets[0]?.weight === 0 }))
+    };
+    renderTplEditor();
+  }
+
+  function renderTplEditor() {
+    const t = ui.tplEdit;
+    let ov = document.getElementById('tpledit');
+    if (!ov) { ov = document.createElement('div'); ov.className = 'modal'; ov.id = 'tpledit'; document.body.appendChild(ov); }
+    const names = [...new Set([...exerciseNames(), ...window.PROGRAMS.flatMap(p => p.templates.flatMap(x => x.exercises.map(e => e.name)))])].sort((a, b) => a.localeCompare(b, 'hr'));
+    ov.innerHTML = `<div class="modal-box lib-box">
+      <div class="card-head"><h2>${t.id ? '✎ Uredi predložak' : '+ Novi predložak'}</h2><button type="button" class="icon-btn" data-act="tplclose" aria-label="Zatvori">✕</button></div>
+      <datalist id="te-names">${names.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+      <div class="form-grid">
+        <label class="field" style="grid-column:span 2">Ime<input data-te="name" value="${esc(t.name)}" placeholder="npr. Push, Noge, Moj full body"></label>
+        <label class="field">Vrsta<select data-te="type">${WORKOUT_TYPES.map(x => `<option ${x === t.type ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
+        <label class="field">Trajanje (min)<input type="number" min="0" data-te="duration" value="${esc(t.duration)}" placeholder="neobavezno"></label>
+      </div>
+      <h3 style="margin:16px 0 8px">Vježbe</h3>
+      <div>${t.exercises.map((e, i) => `
+        <div class="te-ex">
+          <input list="te-names" data-te="ex-name" data-i="${i}" value="${esc(e.name)}" placeholder="Ime vježbe">
+          <div class="te-move">
+            <button type="button" data-act="te-move" data-i="${i}" data-d="-1" ${i === 0 ? 'disabled' : ''} aria-label="Gore">↑</button>
+            <button type="button" data-act="te-move" data-i="${i}" data-d="1" ${i === t.exercises.length - 1 ? 'disabled' : ''} aria-label="Dolje">↓</button>
+            <button type="button" data-act="te-del" data-i="${i}" aria-label="Ukloni vježbu">✕</button>
+          </div>
+          <div class="te-row">
+            <label>Setova <input type="number" min="1" max="20" inputmode="numeric" data-te="ex-sets" data-i="${i}" value="${e.sets}"></label>
+            <label>Ponavljanja <input type="number" min="1" max="500" inputmode="numeric" data-te="ex-reps" data-i="${i}" value="${esc(e.reps)}"></label>
+            <label><input type="checkbox" data-te="ex-bw" data-i="${i}" ${e.bw ? 'checked' : ''} style="width:auto"> bez utega</label>
+          </div>
+        </div>`).join('')}</div>
+      <button type="button" class="btn sm" style="margin-top:10px" data-act="te-add">+ Dodaj vježbu</button>
+      <label class="field" style="margin-top:14px">Bilješke<textarea data-te="notes" placeholder="npr. 40 s rada / 20 s odmora">${esc(t.notes)}</textarea></label>
+      <div class="row" style="margin-top:16px">
+        <button type="button" class="btn primary" data-act="te-save">Spremi predložak</button>
+        <button type="button" class="btn ghost" data-act="tplclose">Odustani</button>
+        <span class="spacer"></span>
+        ${t.id ? `<button type="button" class="btn ghost" data-act="te-copy">Kopiraj</button><button type="button" class="btn ghost danger" data-act="te-delete">Obriši</button>` : ''}
+      </div>
+      <p class="hint">„Bez utega” znači vlastita težina ili kardio — progresija tada dodaje ponavljanja (minute) umjesto kilograma. Promjene ne utječu na već spremljene treninge.</p>
+    </div>`;
+  }
+
+  function closeTplEditor() { ui.tplEdit = null; document.getElementById('tpledit')?.remove(); render(); }
+
   /* ---------- Biblioteka programa ---------- */
   function renderLibrary() {
     let ov = document.getElementById('library');
@@ -990,7 +1052,8 @@
         <form class="card" data-form="workout">
           <div class="card-head"><h2>Novi trening</h2><button type="button" class="btn primary sm" data-act="gymopen">🏋️ Način za teretanu</button></div>
           <div class="chips" style="margin-bottom:14px"><span class="small muted">Predlošci:</span>
-            ${S().templates.map(t => `<span class="chip"><button type="button" data-act="loadtpl" data-id="${t.id}">📋 ${esc(t.name)}</button><button type="button" class="x" data-act="deltpl" data-id="${t.id}" title="Obriši predložak">✕</button></span>`).join('')}
+            ${S().templates.map(t => `<span class="chip"><button type="button" data-act="loadtpl" data-id="${t.id}">📋 ${esc(t.name)}</button><button type="button" class="ed" data-act="tpledit" data-id="${t.id}" title="Uredi predložak" aria-label="Uredi ${esc(t.name)}">✎</button><button type="button" class="x" data-act="deltpl" data-id="${t.id}" title="Obriši predložak">✕</button></span>`).join('')}
+            <button type="button" class="btn sm ghost" data-act="tplnew">+ Novi predložak</button>
             <button type="button" class="btn sm" data-act="libopen">📚 Biblioteka (${window.PROGRAMS.length} programa)</button></div>
           <div class="form-grid">
             <label class="field">Datum<input type="date" name="date" value="${d.date}" required></label>
@@ -1722,6 +1785,34 @@
       case 'scan': openScanner(); return;
       case 'gymopen': openGym(); return;
       case 'libopen': e.preventDefault(); renderLibrary(); return;
+      case 'tpledit': openTplEditor(st.templates.find(t => t.id === id)); return;
+      case 'tplnew': openTplEditor(null); return;
+      case 'tplclose': closeTplEditor(); return;
+      case 'te-add': ui.tplEdit.exercises.push({ name: '', sets: 3, reps: 10, bw: false }); renderTplEditor();
+        document.querySelectorAll('#tpledit [data-te="ex-name"]').forEach((x, i, a) => { if (i === a.length - 1) x.focus(); }); return;
+      case 'te-del': ui.tplEdit.exercises.splice(+el.dataset.i, 1); renderTplEditor(); return;
+      case 'te-move': {
+        const a = ui.tplEdit.exercises, i = +el.dataset.i, j = i + +el.dataset.d;
+        if (j < 0 || j >= a.length) return;
+        [a[i], a[j]] = [a[j], a[i]]; renderTplEditor(); return;
+      }
+      case 'te-copy': ui.tplEdit.id = null; ui.tplEdit.name += ' (kopija)'; renderTplEditor(); toast('Kopija — promijeni i spremi'); return;
+      case 'te-delete':
+        if (!confirm('Obrisati ovaj predložak? Uklonit će se i iz tjednog plana.')) return;
+        deleteTemplate(ui.tplEdit.id); Store.save(); toast('Predložak obrisan'); closeTplEditor(); return;
+      case 'te-save': {
+        const t = ui.tplEdit;
+        const exs = t.exercises.filter(x => x.name.trim());
+        if (!t.name.trim()) { toast('Upiši ime predloška'); return; }
+        if (!exs.length) { toast('Dodaj barem jednu vježbu'); return; }
+        const tpl = {
+          name: t.name.trim(), type: t.type, duration: num(t.duration) || '', notes: t.notes.trim(),
+          exercises: exs.map(x => ({ name: x.name.trim(), sets: Array.from({ length: Math.max(1, Math.min(20, num(x.sets) || 1)) }, () => ({ reps: num(x.reps) || '', weight: x.bw ? 0 : '' })) }))
+        };
+        if (t.id) { const i = st.templates.findIndex(x => x.id === t.id); st.templates[i] = { ...st.templates[i], ...tpl }; }
+        else st.templates.push({ id: Store.uid(), ...tpl });
+        Store.save(); toast('Predložak spremljen'); closeTplEditor(); return;
+      }
       case 'libclose': document.getElementById('library')?.remove(); render(); return;
       case 'libcat': {
         ui.libCat = el.dataset.c; renderLibrary();
@@ -1808,7 +1899,7 @@
       }
       case 'deltpl':
         if (!confirm('Obrisati ovaj predložak?')) return;
-        st.templates = st.templates.filter(t => t.id !== id); Store.save(); break;
+        deleteTemplate(id); Store.save(); break;
       case 'install':
         if (!installPrompt) return;
         installPrompt.prompt();
@@ -1900,6 +1991,7 @@
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && document.getElementById('scanner')) { closeScanner(); return; }
+    if (e.key === 'Escape' && document.getElementById('tpledit')) { closeTplEditor(); return; }
     if (e.key === 'Escape' && document.getElementById('library')) { document.getElementById('library').remove(); render(); return; }
     if (e.key === 'Enter' && e.target.dataset?.gf) { e.preventDefault(); e.target.blur(); return; }
     if (e.target.matches('[data-search="food"]')) {
@@ -1922,6 +2014,11 @@
 
   document.addEventListener('change', (e) => {
     const el = e.target;
+    if (el.dataset.te && ui.tplEdit) {
+      if (el.dataset.te === 'ex-bw') ui.tplEdit.exercises[+el.dataset.i].bw = el.checked;
+      else if (el.dataset.te === 'type') ui.tplEdit.type = el.value;
+      return;
+    }
     const c = el.dataset.change;
     if (!c) return;
     switch (c) {
@@ -2080,6 +2177,13 @@
       renderSuggest(t);
     }
     if (t.matches('[data-grams]')) recalcMeal();
+    if (t.dataset.te && ui.tplEdit) {
+      const k = t.dataset.te, i = +t.dataset.i, ed = ui.tplEdit;
+      if (k === 'ex-name') ed.exercises[i].name = t.value;
+      else if (k === 'ex-sets') ed.exercises[i].sets = t.value;
+      else if (k === 'ex-reps') ed.exercises[i].reps = t.value;
+      else ed[k] = t.value;
+    }
     const cf = t.closest('form[data-form="calc"]');
     if (cf) { const p = readCalcForm(cf); document.getElementById('calc-result').innerHTML = calcResultHtml(p, calcGoals(p)); }
   });
