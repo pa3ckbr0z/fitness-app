@@ -879,6 +879,36 @@
       </form>`;
   }
 
+  function syncStatusText() {
+    const s = Sync.status;
+    if (s.state === 'syncing') return '↻ Sinkroniziram…';
+    if (s.state === 'error') return `⚠️ ${esc(s.error)}`;
+    if (!s.last) return 'Još nije sinkronizirano.';
+    const min = Math.round((Date.now() - s.last) / 60000);
+    return `✅ Zadnja sinkronizacija: ${min < 1 ? 'upravo sada' : min < 60 ? `prije ${min} min` : new Date(s.last).toLocaleString('hr-HR', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
+  }
+
+  function syncCard() {
+    const head = `<div class="card-head"><h2>☁️ Sinkronizacija</h2>${window.Sync && Sync.user ? '<span class="tag accent">uključena</span>' : ''}</div>`;
+    if (!window.Sync || !Sync.enabled()) return `<div class="card">${head}<p class="small muted" style="margin:0">Sinkronizacija još nije podešena.</p></div>`;
+    const u = Sync.user;
+    if (!u) return `
+      <form class="card" data-form="login">${head}
+        <p class="small muted" style="margin-top:0">Prijavi se istim računom na mobitelu i računalu — podaci se automatski spajaju i spremaju u oblak (sigurnosna kopija).</p>
+        <label class="field">E-mail<input type="email" name="email" autocomplete="username" required></label>
+        <label class="field" style="margin-top:10px">Lozinka<input type="password" name="password" autocomplete="current-password" minlength="6" required></label>
+        <div class="row" style="margin-top:12px"><button class="btn primary" type="submit" value="in">Prijava</button><button class="btn" type="submit" value="up">Registracija</button></div>
+        <div class="hint" id="sync-msg">${Sync.status.error ? '⚠️ ' + esc(Sync.status.error) : 'Prvi put? Upiši e-mail i lozinku (min. 6 znakova) i klikni Registracija.'}</div>
+      </form>`;
+    return `
+      <div class="card">${head}
+        <p class="small" style="margin-top:0">Prijavljen: <strong>${esc(u.email)}</strong></p>
+        <p class="small muted" id="sync-status">${syncStatusText()}</p>
+        <div class="row"><button class="btn" data-act="syncnow">↻ Sinkroniziraj sada</button><button class="btn ghost" data-act="logout">Odjava</button></div>
+        <p class="hint">Promjene se šalju automatski nekoliko sekundi nakon upisa i preuzimaju pri svakom otvaranju aplikacije.</p>
+      </div>`;
+  }
+
   function viewSettings() {
     const st = S().settings;
     const f = (name, label, attrs = '') => `<label class="field">${label}<input type="number" name="${name}" value="${st[name] ?? ''}" ${attrs}></label>`;
@@ -906,6 +936,7 @@
           <div class="row" style="margin-top:18px"><button class="btn primary" type="submit">Spremi postavke</button></div>
         </form>
         <div class="stack">
+          ${syncCard()}
           <div class="card"><div class="card-head"><h2>Moje navike</h2></div>
             <div class="list">${S().habits.map(h => `<div class="list-item"><span style="font-size:1.2rem">${esc(h.icon)}</span><div class="grow">${esc(h.name)}</div>
               <button class="icon-btn" data-act="delhabit" data-id="${h.id}" title="Ukloni">✕</button></div>`).join('')}</div>
@@ -1165,6 +1196,10 @@
         document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
         toast('Sigurnosna kopija preuzeta'); return;
       }
+      case 'syncnow': Sync.sync(); return;
+      case 'logout':
+        if (!confirm('Odjaviti se? Podaci ostaju na ovom uređaju i u oblaku.')) return;
+        Sync.signOut().then(render); return;
       case 'reset':
         if (!confirm('Sigurno obrisati SVE podatke? Ovo se ne može poništiti.')) return;
         Store.reset(); applyTheme(); toast('Svi podaci obrisani'); break;
@@ -1261,6 +1296,23 @@
         Store.save(); toast(msg);
         break;
       }
+      case 'login': {
+        const mode = e.submitter?.value || 'in';
+        const msg = form.querySelector('#sync-msg');
+        const btns = form.querySelectorAll('button');
+        btns.forEach(b => b.disabled = true);
+        msg.textContent = mode === 'up' ? 'Registriram…' : 'Prijavljujem…';
+        const email = fd.email.trim(), pass = fd.password;
+        (mode === 'up' ? Sync.signUp(email, pass) : Sync.signIn(email, pass))
+          .then(r => {
+            if (mode === 'up' && r && !r.confirmed) {
+              msg.innerHTML = '✉️ Poslali smo ti e-mail. Klikni link za potvrdu — vratit ćeš se ovdje već prijavljen. (Ako nema maila, provjeri neželjenu poštu.)';
+              btns.forEach(b => b.disabled = false);
+            } else { toast('Prijavljen — podaci se sinkroniziraju'); render(); }
+          })
+          .catch(err => { msg.textContent = '⚠️ ' + err.message; btns.forEach(b => b.disabled = false); });
+        return;
+      }
       case 'customfood': {
         const g = num(fd.portionG);
         st.customFoods = (st.customFoods || []).filter(f => norm(f.name) !== norm(fd.name.trim()));
@@ -1331,4 +1383,16 @@
   window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); });
   applyTheme();
   render();
+
+  if (window.Sync) {
+    Sync.onChange((changed) => {
+      const el = document.getElementById('sync-status');
+      if (el) el.innerHTML = syncStatusText();
+      const a = document.activeElement;
+      if ($view.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.type !== 'submit') return; // ne prekidaj tipkanje
+      const shownLoggedIn = !!document.getElementById('sync-status');
+      if (changed || (route() === 'postavke' && shownLoggedIn !== !!Sync.user)) { applyTheme(); render(); }
+    });
+    Sync.start();
+  }
 })();

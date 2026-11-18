@@ -72,9 +72,17 @@
 
   let state = load();
 
-  function save() {
+  // Oznaka vremena promjene postavki (za sinkronizaciju između uređaja)
+  const settingsSig = (st) => { const { _t, ...rest } = st; return JSON.stringify(rest); };
+  let lastSettings = settingsSig(state.settings);
+  const listeners = [];
+
+  function save(opts = {}) {
+    const sig = settingsSig(state.settings);
+    if (sig !== lastSettings) { state.settings._t = Date.now(); lastSettings = sig; }
     try { localStorage.setItem(KEY, JSON.stringify(state)); }
     catch (e) { console.warn('Ne mogu spremiti podatke', e); }
+    if (!opts.silent) listeners.forEach(fn => { try { fn(); } catch (e) { console.warn(e); } });
   }
 
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -83,14 +91,17 @@
     get state() { return state; },
     save,
     uid,
+    onSave(fn) { listeners.push(fn); },
     day(date) {
       if (!state.daily[date]) state.daily[date] = { habits: {}, water: 0, sleep: null, steps: null, mood: null, note: '' };
+      state.daily[date]._t = Date.now(); // day() se poziva samo prije izmjene
       return state.daily[date];
     },
     peekDay(date) { return state.daily[date] || null; },
-    replace(data) {
+    replace(data, opts = {}) {
       state = { ...structuredClone(DEFAULT), ...data, settings: { ...DEFAULT.settings, ...(data.settings || {}) } };
-      save();
+      if (opts.silent) lastSettings = settingsSig(state.settings); // ne mijenjaj oznaku vremena kod spajanja
+      save(opts);
     },
     reset() { state = structuredClone(DEFAULT); save(); },
     exportJSON() { return JSON.stringify(state, null, 2); }

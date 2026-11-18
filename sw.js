@@ -1,13 +1,15 @@
 /* Service worker: aplikacija radi i bez interneta.
    Kad mijenjaš datoteke aplikacije, povećaj VERSION da se nova verzija preuzme. */
-const VERSION = 'v3';
+const VERSION = 'v4';
 const CACHE = 'moj-napredak-' + VERSION;
 const FILES = [
   './',
   './index.html',
   './styles.css',
   './manifest.webmanifest',
+  './js/config.js',
   './js/store.js',
+  './js/sync.js',
   './js/charts.js',
   './js/foods.js',
   './js/app.js',
