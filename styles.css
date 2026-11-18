@@ -367,5 +367,46 @@ tr:last-child td { border-bottom: 0; }
 .insight b { display: block; font-size: .95rem; }
 .insight p { margin: 2px 0 0; font-size: .86rem; color: var(--muted); }
 
+/* Način za teretanu */
+.gym { position: fixed; inset: 0; z-index: 55; background: var(--bg); overflow-y: auto;
+  padding: calc(12px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));
+  display: flex; flex-direction: column; gap: 14px; max-width: 560px; margin: 0 auto; }
+body.gym-on { overflow: hidden; }
+.gym-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.gym-icon { width: 46px; height: 46px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 1.4rem; cursor: pointer; flex-shrink: 0; }
+.gym-icon:disabled { opacity: .3; cursor: default; }
+.gym-clock { font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.gym-nav { display: flex; align-items: center; gap: 10px; }
+.gym-title { flex: 1; text-align: center; min-width: 0; }
+.gym-title h2 { font-size: 1.55rem; overflow-wrap: anywhere; }
+.gym-last { font-size: .85rem; color: var(--muted); text-align: center; }
+.gym-sets { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
+.gym-set { font: inherit; border: 2px solid var(--border); background: var(--surface); color: var(--text); border-radius: 12px; padding: 8px 4px; display: flex; flex-direction: column; align-items: center; gap: 1px; cursor: pointer; }
+.gym-set span { font-size: .72rem; color: var(--muted); }
+.gym-set b { font-size: .92rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.gym-set i { font-style: normal; color: var(--accent); height: 1.1em; font-weight: 800; }
+.gym-set.cur { border-color: var(--accent); }
+.gym-set.done { background: var(--accent-soft); }
+.gym-set.add { border-style: dashed; color: var(--muted); justify-content: center; font-weight: 600; }
+.gym-edit { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 400px) { .gym-edit { grid-template-columns: 1fr; } }
+.stepper { display: flex; align-items: stretch; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; min-height: 84px; }
+.stepper button { width: 58px; font-size: 1.9rem; border: 0; background: var(--surface-2); color: var(--text); cursor: pointer; flex-shrink: 0; }
+.stepper button:active { background: var(--accent-soft); }
+.stepper label { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 0; }
+.stepper input { border: 0; background: transparent; text-align: center; font-size: 2.1rem; font-weight: 800; padding: 0; width: 100%; font-variant-numeric: tabular-nums; }
+.stepper input:focus { outline: none; }
+.stepper span { font-size: .75rem; color: var(--muted); }
+.gym-done { font: inherit; font-size: 1.3rem; font-weight: 800; border: 0; border-radius: 16px; padding: 22px; background: var(--accent); color: var(--accent-text); cursor: pointer; }
+.gym-done.is-done { background: var(--surface-2); color: var(--text); font-size: 1rem; padding: 16px; }
+.gym-rest { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.chipbtn { font: inherit; font-size: .85rem; font-weight: 600; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 99px; padding: 6px 12px; cursor: pointer; }
+.chipbtn.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.gym-bottom { display: flex; gap: 10px; margin-top: auto; padding-top: 8px; }
+.gym-bottom .btn { flex: 1; justify-content: center; padding: 14px; }
+body.gym-on .timer { z-index: 70; right: 50%; transform: translateX(50%); bottom: calc(96px + env(safe-area-inset-bottom)); padding: 12px 12px 12px 22px; animation: none; }
+body.gym-on .timer .t-time { font-size: 2rem; }
+.gym-banner { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; background: var(--accent-soft); border-color: transparent; }
+
 details summary { cursor: pointer; font-weight: 600; }
 .hint { font-size: .8rem; color: var(--muted); margin-top: 8px; }

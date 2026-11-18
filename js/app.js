@@ -37,6 +37,7 @@
     weightRange: 90,
     reportWeek: null, // ponedjeljak tjedna u izvještaju (null = zadnji završeni tjedan)
     exercise: null,
+    gym: null,       // način za teretanu: { ex, set, start }
     selFood: null,   // odabrana namirnica iz baze u formi za obrok
     sug: [],         // trenutni rezultati pretrage
     sugIdx: -1,
@@ -717,6 +718,7 @@
     const done = S().workouts.some(w => w.date === today());
     let body;
     if (done) body = `<span style="font-size:1.6rem">✅</span><div><div class="big">Današnji trening je odrađen</div><div class="small muted">Odlično — sad odmor i proteini.</div></div>`;
+    else if (ui.gym) return '';
     else if (t) body = `<span style="font-size:1.6rem">🏋️</span><div class="grow"><div class="big">Danas: ${esc(t.name)}</div><div class="small muted">${t.exercises.map(e => esc(e.name)).join(' · ')}</div></div>
       <span class="spacer"></span><button class="btn primary" data-act="starttoday">Započni trening</button>`;
     else body = `<span style="font-size:1.6rem">😌</span><div><div class="big">Danas je dan odmora</div><div class="small muted">Oporavak je dio napretka.</div></div>`;
@@ -764,6 +766,7 @@
         <p class="muted small" style="margin:4px 0 0">Kreni upisom kilaže u <a href="#/tijelo">Tijelo</a>, postavi ciljeve u <a href="#/postavke">Postavkama</a>,
         ili učitaj primjer podataka da vidiš kako sve izgleda.</p></div><span class="spacer"></span>
         <button class="btn" data-act="demo">Učitaj primjer</button></div></div>` : ''}
+      ${gymBanner()}
       ${todayCard()}
       <div class="grid grid-2" style="margin-bottom:16px;align-items:start">${readinessCard()}${insightsCard()}</div>
       <div class="grid grid-4">
@@ -945,7 +948,7 @@
       </div>
       <div class="grid grid-2" style="margin-top:16px;align-items:start">
         <form class="card" data-form="workout">
-          <div class="card-head"><h2>Novi trening</h2></div>
+          <div class="card-head"><h2>Novi trening</h2><button type="button" class="btn primary sm" data-act="gymopen">🏋️ Način za teretanu</button></div>
           ${S().templates.length ? `<div class="chips" style="margin-bottom:14px"><span class="small muted">Predlošci:</span>
             ${S().templates.map(t => `<span class="chip"><button type="button" data-act="loadtpl" data-id="${t.id}">📋 ${esc(t.name)}</button><button type="button" class="x" data-act="deltpl" data-id="${t.id}" title="Obriši predložak">✕</button></span>`).join('')}</div>` : ''}
           <div class="form-grid">
@@ -1000,6 +1003,148 @@
           </div>
         </div>
       </div>`;
+  }
+
+  /** Spremi ui.draft kao trening. onlyDone = samo setovi označeni kao gotovi (način za teretanu). */
+  function saveWorkout(onlyDone) {
+    const st = S(), d = ui.draft;
+    const exercises = d.exercises
+      .map(ex => ({ name: ex.name.trim(), sets: ex.sets.filter(s => !onlyDone || s.done).map(s => ({ reps: num(s.reps) || 0, weight: num(s.weight) || 0 })).filter(s => s.reps > 0) }))
+      .filter(ex => ex.name && ex.sets.length);
+    if (!exercises.length && !num(d.duration)) { alert('Dodaj barem jednu vježbu sa setom ili upiši trajanje.'); return false; }
+    st.workouts.push({ id: Store.uid(), date: d.date || today(), type: d.type, duration: num(d.duration), notes: (d.notes || '').trim(), exercises });
+    Store.save();
+    const prs = exercises.filter(ex => {
+      const top = Math.max(...ex.sets.map(s => s.weight));
+      if (!top) return false;
+      const before = st.workouts.slice(0, -1).flatMap(w => w.exercises.filter(e2 => e2.name.trim() === ex.name).flatMap(e2 => e2.sets.map(s => s.weight)));
+      return before.length && top > Math.max(...before);
+    });
+    ui.draft = newDraft();
+    toast(prs.length ? `🏆 Novi rekord: ${prs.map(p => p.name).join(', ')}!` : 'Trening spremljen 💪');
+    return true;
+  }
+
+  /* ============================================================
+     NAČIN ZA TERETANU
+     ============================================================ */
+  const GKEY = 'mojNapredak.gym';
+  let gymClock = null, wakeLock = null;
+
+  function gymPersist() {
+    try { ui.gym ? localStorage.setItem(GKEY, JSON.stringify({ draft: ui.draft, gym: ui.gym })) : localStorage.removeItem(GKEY); } catch (e) {}
+  }
+  async function lockScreen() {
+    try {
+      if ('wakeLock' in navigator && !wakeLock) {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; });
+      }
+    } catch (e) { /* nije podržano ili baterija štedi */ }
+  }
+  function unlockScreen() { try { wakeLock?.release(); } catch (e) {} wakeLock = null; }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && document.getElementById('gym')) lockScreen(); });
+
+  function gymFirstUndone() {
+    const ex = ui.draft.exercises[ui.gym.ex];
+    if (!ex) return;
+    const i = ex.sets.findIndex(s => !s.done);
+    ui.gym.set = i >= 0 ? i : Math.max(0, ex.sets.length - 1);
+  }
+
+  function openGym() {
+    syncDraft();
+    const d = ui.draft;
+    d.exercises = d.exercises.filter(e => e.name.trim());
+    if (!d.exercises.length) { d.exercises = newDraft().exercises; alert('Prvo odaberi predložak ili upiši barem jednu vježbu.'); return; }
+    d.exercises.forEach(e => { if (!e.sets.length) e.sets.push({ reps: '', weight: '' }); });
+    if (!ui.gym) ui.gym = { ex: 0, set: 0, start: Date.now() };
+    ui.gym.ex = Math.min(ui.gym.ex, d.exercises.length - 1);
+    gymFirstUndone();
+    window.gymActive = true;
+    document.body.classList.add('gym-on');
+    renderGym(); lockScreen();
+    clearInterval(gymClock); gymClock = setInterval(tickGym, 1000);
+    gymPersist();
+  }
+
+  function closeGym(keep) {
+    clearInterval(gymClock); unlockScreen();
+    window.gymActive = false;
+    document.body.classList.remove('gym-on');
+    document.getElementById('gym')?.remove();
+    if (!keep) ui.gym = null;
+    gymPersist(); render();
+  }
+
+  function tickGym() {
+    const el = document.getElementById('gym-clock');
+    if (!el || !ui.gym) return;
+    const s = Math.floor((Date.now() - ui.gym.start) / 1000), h = Math.floor(s / 3600);
+    el.textContent = `${h ? h + ':' : ''}${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`;
+  }
+
+  const gymStepper = (f, label, v, step) => `<div class="stepper">
+      <button type="button" data-act="gymstep" data-f="${f}" data-d="${-step}" aria-label="Manje">−</button>
+      <label><input type="number" inputmode="decimal" step="any" min="0" data-gf="${f}" value="${esc(v ?? '')}" placeholder="0"><span>${label}</span></label>
+      <button type="button" data-act="gymstep" data-f="${f}" data-d="${step}" aria-label="Više">+</button></div>`;
+
+  function renderGym() {
+    let el = document.getElementById('gym');
+    if (!el) { el = document.createElement('div'); el.id = 'gym'; el.className = 'gym'; document.body.appendChild(el); }
+    const d = ui.draft, g = ui.gym, ex = d.exercises[g.ex], s = ex.sets[g.set] || ex.sets[0];
+    const doneEx = d.exercises.filter(e => e.sets.length && e.sets.every(x => x.done)).length;
+    const l = lastSession(ex.name);
+    const sg = suggestSets(ex.name, ex.sets);
+    const rest = S().settings.restSec || 90;
+    const fmtW = (w) => (w === '' || w == null) ? '–' : fmt(num(w) || 0);
+    el.innerHTML = `
+      <div class="gym-top">
+        <button class="gym-icon" data-act="gymexit" aria-label="Smanji" title="Smanji (trening ostaje u tijeku)">⌄</button>
+        <div class="gym-clock" id="gym-clock">00:00</div>
+        <span class="tag accent">${doneEx}/${d.exercises.length} vježbi</span>
+      </div>
+      <div class="gym-nav">
+        <button class="gym-icon" data-act="gymex" data-n="-1" ${g.ex === 0 ? 'disabled' : ''} aria-label="Prethodna vježba">‹</button>
+        <div class="gym-title"><div class="small muted">Vježba ${g.ex + 1} od ${d.exercises.length}</div><h2>${esc(ex.name)}</h2></div>
+        <button class="gym-icon" data-act="gymex" data-n="1" ${g.ex === d.exercises.length - 1 ? 'disabled' : ''} aria-label="Sljedeća vježba">›</button>
+      </div>
+      ${l ? `<div class="gym-last">Prošli put (${shortDate(l.date)}): ${l.sets.map(x => x.weight ? `${x.reps}×${fmt(x.weight)}` : x.reps).join(', ')}${sg ? `<br><span class="${sg.up ? 'sug' : ''}">${sg.note}</span>` : ''}</div>` : ''}
+      <div class="gym-sets">
+        ${ex.sets.map((x, i) => `<button class="gym-set ${i === g.set ? 'cur' : ''} ${x.done ? 'done' : ''}" data-act="gymset" data-i="${i}"><span>Set ${i + 1}</span><b>${x.reps || '–'} × ${fmtW(x.weight)}</b><i>${x.done ? '✓' : ''}</i></button>`).join('')}
+        <button class="gym-set add" data-act="gymaddset">+ Set</button>
+      </div>
+      <div class="gym-edit">
+        ${gymStepper('weight', 'kg', s.weight, S().settings.increment || 2.5)}
+        ${gymStepper('reps', 'ponavljanja', s.reps, 1)}
+      </div>
+      <button class="gym-done ${s.done ? 'is-done' : ''}" data-act="gymdone">${s.done ? '↺ Poništi set' : `✓ Set ${g.set + 1} gotov`}</button>
+      <div class="gym-rest"><span class="small muted">Odmor nakon seta:</span>
+        ${[60, 90, 120, 180].map(v => `<button class="chipbtn ${rest === v ? 'on' : ''}" data-act="gymrest" data-s="${v}">${mmss(v)}</button>`).join('')}
+        ${ex.sets.length > 1 && !s.done ? `<button class="chipbtn" data-act="gymrmset">Ukloni set</button>` : ''}
+      </div>
+      <div class="gym-bottom">
+        <button class="btn" data-act="gymaddex">+ Vježba</button>
+        <button class="btn primary" data-act="gymfinish">Završi trening</button>
+      </div>`;
+    tickGym();
+  }
+
+  /** Promijeni vrijednost trenutnog seta; neodrađeni setovi iza s istom starom vrijednošću prate promjenu. */
+  function gymSetValue(f, v) {
+    const sets = ui.draft.exercises[ui.gym.ex].sets, s = sets[ui.gym.set], old = s[f];
+    s[f] = v;
+    sets.slice(ui.gym.set + 1).forEach(x => { if (!x.done && String(x[f] ?? '') === String(old ?? '')) x[f] = v; });
+    document.querySelectorAll('.gym-set b').forEach((b, i) => { const x = sets[i]; if (x) b.textContent = `${x.reps || '–'} × ${x.weight === '' || x.weight == null ? '–' : fmt(num(x.weight) || 0)}`; });
+  }
+
+  function gymBanner() {
+    if (!ui.gym || document.getElementById('gym')) return '';
+    const sets = ui.draft.exercises.flatMap(e => e.sets);
+    const min = Math.round((Date.now() - ui.gym.start) / 60000);
+    return `<div class="card gym-banner"><span style="font-size:1.6rem">🏋️</span><div class="grow"><b>Trening u tijeku</b>
+      <div class="small muted">${min} min · ${sets.filter(s => s.done).length}/${sets.length} setova</div></div>
+      <button class="btn primary" data-act="gymopen">Nastavi</button></div>`;
   }
 
   function syncDraft() {
@@ -1487,10 +1632,67 @@
         const t = todayPlan(); if (!t) return;
         loadTemplate(t);
         location.hash = '#/trening';
+        openGym();
         toast(`${t.name} — težine predložene prema prošlom treningu`);
         return;
       }
       case 'scan': openScanner(); return;
+      case 'gymopen': openGym(); return;
+      case 'gymexit': closeGym(true); return;
+      case 'gymex': ui.gym.ex = Math.max(0, Math.min(ui.draft.exercises.length - 1, ui.gym.ex + +el.dataset.n)); gymFirstUndone(); renderGym(); gymPersist(); return;
+      case 'gymset': ui.gym.set = +el.dataset.i; renderGym(); return;
+      case 'gymstep': {
+        const s = ui.draft.exercises[ui.gym.ex].sets[ui.gym.set];
+        const f = el.dataset.f;
+        gymSetValue(f, Math.max(0, Math.round(((num(s[f]) || 0) + +el.dataset.d) * 100) / 100));
+        renderGym(); gymPersist(); return;
+      }
+      case 'gymdone': {
+        const ex = ui.draft.exercises[ui.gym.ex], s = ex.sets[ui.gym.set];
+        if (s.done) { s.done = false; renderGym(); gymPersist(); return; }
+        if (!num(s.reps)) { toast('Upiši broj ponavljanja'); return; }
+        s.done = true;
+        navigator.vibrate?.(60);
+        // prenesi težinu/ponavljanja na prazne setove iza
+        ex.sets.slice(ui.gym.set + 1).forEach(x => { if (!x.done) { if (x.weight === '' || x.weight == null) x.weight = s.weight; if (!x.reps) x.reps = s.reps; } });
+        const next = ex.sets.findIndex(x => !x.done);
+        if (next >= 0) { ui.gym.set = next; startRest(S().settings.restSec || 90); }
+        else if (ui.gym.ex < ui.draft.exercises.length - 1) {
+          ui.gym.ex++; gymFirstUndone(); startRest(S().settings.restSec || 90);
+          toast(`Sljedeća: ${ui.draft.exercises[ui.gym.ex].name}`);
+        } else toast('Sve vježbe odrađene 💪 — klikni Završi trening');
+        renderGym(); gymPersist(); return;
+      }
+      case 'gymaddset': {
+        const sets = ui.draft.exercises[ui.gym.ex].sets, last = sets[sets.length - 1] || { reps: '', weight: '' };
+        sets.push({ reps: last.reps, weight: last.weight });
+        ui.gym.set = sets.length - 1; renderGym(); gymPersist(); return;
+      }
+      case 'gymrmset': {
+        const sets = ui.draft.exercises[ui.gym.ex].sets;
+        if (sets.length > 1) { sets.splice(ui.gym.set, 1); gymFirstUndone(); }
+        renderGym(); gymPersist(); return;
+      }
+      case 'gymaddex': {
+        const name = prompt('Ime vježbe:');
+        if (!name || !name.trim()) return;
+        const sg = suggestSets(name.trim());
+        ui.draft.exercises.push({ name: name.trim(), sets: sg ? sg.sets.map(x => ({ ...x })) : [{ reps: '', weight: '' }, { reps: '', weight: '' }, { reps: '', weight: '' }] });
+        ui.gym.ex = ui.draft.exercises.length - 1; ui.gym.set = 0;
+        renderGym(); gymPersist(); return;
+      }
+      case 'gymrest': st.settings.restSec = +el.dataset.s; Store.save(); renderGym(); return;
+      case 'gymfinish': {
+        const anyDone = ui.draft.exercises.some(e => e.sets.some(s => s.done));
+        if (!anyDone && !confirm('Nijedan set nije označen kao gotov. Spremiti sve upisane setove?')) return;
+        if (!confirm('Završiti i spremiti trening?')) return;
+        ui.draft.duration = Math.max(1, Math.round((Date.now() - ui.gym.start) / 60000));
+        ui.draft.date = today();
+        if (!saveWorkout(anyDone)) return;
+        clearInterval(timer.iv); timer.end = 0; document.getElementById('timer').hidden = true;
+        closeGym(false);
+        return;
+      }
       case 'scanclose': closeScanner(); return;
       case 'savetpl': {
         syncDraft();
@@ -1651,22 +1853,7 @@
     switch (kind) {
       case 'workout': {
         syncDraft();
-        const d = ui.draft;
-        const exercises = d.exercises
-          .map(ex => ({ name: ex.name.trim(), sets: ex.sets.map(s => ({ reps: num(s.reps) || 0, weight: num(s.weight) || 0 })).filter(s => s.reps > 0) }))
-          .filter(ex => ex.name && ex.sets.length);
-        if (!exercises.length && !num(d.duration)) { alert('Dodaj barem jednu vježbu sa setom ili upiši trajanje.'); return; }
-        st.workouts.push({ id: Store.uid(), date: d.date || today(), type: d.type, duration: num(d.duration), notes: d.notes.trim(), exercises });
-        Store.save();
-        // Novi rekord?
-        const prs = exercises.filter(ex => {
-          const top = Math.max(...ex.sets.map(s => s.weight));
-          if (!top) return false;
-          const before = st.workouts.slice(0, -1).flatMap(w => w.exercises.filter(e2 => e2.name.trim() === ex.name).flatMap(e2 => e2.sets.map(s => s.weight)));
-          return before.length && top > Math.max(...before);
-        });
-        ui.draft = newDraft();
-        toast(prs.length ? `🏆 Novi rekord: ${prs.map(p => p.name).join(', ')}!` : 'Trening spremljen 💪');
+        if (!saveWorkout(false)) return;
         break;
       }
       case 'meal': {
@@ -1776,6 +1963,11 @@
   document.addEventListener('input', (e) => {
     const t = e.target;
     if (t.closest('form[data-form="workout"]')) syncDraft();
+    if (t.dataset.gf && ui.gym) {
+      const s = ui.draft.exercises[ui.gym.ex].sets[ui.gym.set];
+      gymSetValue(t.dataset.gf, t.value === '' ? '' : num(t.value));
+      gymPersist();
+    }
     if (t.matches('[data-f="name"][data-ex]')) { const h = $view.querySelector(`[data-last="${t.dataset.ex}"]`); if (h) h.innerHTML = lastHtml(t.value, t.dataset.ex, ui.draft.exercises[+t.dataset.ex]?.sets); }
     if (t.matches('[data-search="food"]')) {
       if (ui.selFood && t.value !== ui.selFood.name) { ui.selFood = null; updateFoodSel(); }
@@ -1789,7 +1981,14 @@
 
   window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); });
   applyTheme();
+  // Trening u tijeku (npr. mobitel je zatvorio aplikaciju) → nastavi gdje si stao
+  try {
+    const saved = JSON.parse(localStorage.getItem(GKEY));
+    if (saved && saved.gym && Date.now() - saved.gym.start < 12 * 3600 * 1000) { ui.draft = saved.draft; ui.gym = saved.gym; }
+    else localStorage.removeItem(GKEY);
+  } catch (e) {}
   render();
+  if (ui.gym) openGym();
 
   if (window.Sync) {
     Sync.onChange((changed) => {

@@ -55,7 +55,7 @@
       // Kad stigne nova verzija aplikacije, osvježi stranicu (osim ako nešto upravo tipkaš)
       const hadController = !!navigator.serviceWorker.controller;
       navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (!hadController) return;
+        if (!hadController || window.gymActive) return; // ne prekidaj trening u tijeku
         const a = document.activeElement;
         if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
         location.reload();
