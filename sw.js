@@ -1,6 +1,6 @@
 /* Service worker: aplikacija radi i bez interneta.
    Kad mijenjaš datoteke aplikacije, povećaj VERSION da se nova verzija preuzme. */
-const VERSION = 'v5';
+const VERSION = 'v6';
 const CACHE = 'moj-napredak-' + VERSION;
 const FILES = [
   './',
@@ -36,7 +36,7 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
   e.respondWith(
-    fetch(req)
+    fetch(req, { cache: 'no-cache' }) // uvijek provjeri ima li nove verzije (GitHub Pages inače drži staro 10 min)
       .then(res => {
         if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
         return res;
