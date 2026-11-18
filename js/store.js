@@ -15,6 +15,8 @@
       sleepGoal: 8,         // sati
       stepsGoal: 10000,
       workoutsPerWeek: 4,
+      program: {},        // tjedni plan: { '1': 't1', ... } dan u tjednu (0=ned) → id predloška
+      increment: 2.5,     // kg za progresiju
       theme: 'auto',
       // Kalkulator ciljeva
       sex: 'm',

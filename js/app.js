@@ -176,10 +176,172 @@
     }
     return null;
   }
-  function lastHtml(name, i) {
+  /** Prijedlog za idući trening (dvostruka progresija): ako su prošli put svi setovi
+      odrađeni do ciljanih ponavljanja → +2,5 kg (ili +1 ponavljanje bez utega), inače ista težina. */
+  function suggestSets(name, tplSets) {
+    const l = lastSession(name);
+    if (!l) return null;
+    const target = num(tplSets?.[0]?.reps) || num(l.sets[0]?.reps) || 0;
+    const nSets = tplSets?.length || l.sets.length;
+    const lastW = Math.max(0, ...l.sets.map(s => num(s.weight) || 0));
+    const topSets = l.sets.filter(s => (num(s.weight) || 0) === lastW);
+    const allHit = target > 0 && topSets.length >= nSets && topSets.every(s => (num(s.reps) || 0) >= target);
+    const inc = S().settings.increment || 2.5;
+    if (lastW === 0) {
+      const minR = Math.min(...l.sets.map(s => num(s.reps) || 0));
+      const reps = allHit ? Math.max(target, minR) + 1 : target;
+      return { sets: Array.from({ length: nSets }, () => ({ reps, weight: 0 })), up: allHit, note: allHit ? '↑ +1 ponavljanje' : `cilj ${target} ponavljanja u svakom setu` };
+    }
+    const weight = allHit ? lastW + inc : lastW;
+    return { sets: Array.from({ length: nSets }, () => ({ reps: target, weight })), up: allHit, note: allHit ? `↑ +${fmt(inc)} kg — prošli put si sve odradio` : `ista težina — cilj ${nSets}×${target}` };
+  }
+
+  function lastHtml(name, i, curSets) {
     const l = lastSession(name);
     if (!l) return '';
-    return `Prošli put (${shortDate(l.date)}): <span class="num">${l.sets.map(s => s.weight ? `${s.reps}×${fmt(s.weight)}` : s.reps).join(', ')}</span> · <a href="#" data-act="filllast" data-i="${i}">učitaj</a>`;
+    const sg = suggestSets(name, curSets && num(curSets[0]?.reps) ? curSets : null);
+    const s0 = sg?.sets[0];
+    return `Prošli put (${shortDate(l.date)}): <span class="num">${l.sets.map(s => s.weight ? `${s.reps}×${fmt(s.weight)}` : s.reps).join(', ')}</span>
+      ${sg ? `<br><span class="${sg.up ? 'sug' : ''}">Prijedlog: ${sg.sets.length}×${s0.reps}${s0.weight ? ` × ${fmt(s0.weight)} kg` : ''} · ${sg.note}</span>` : ''}
+      · <a href="#" data-act="filllast" data-i="${i}">učitaj</a>`;
+  }
+
+  function loadTemplate(t) {
+    ui.draft = {
+      date: today(), type: t.type, duration: '', notes: '',
+      exercises: t.exercises.map(ex => {
+        const sg = suggestSets(ex.name, ex.sets);
+        return { name: ex.name, sets: (sg ? sg.sets : ex.sets).map(s => ({ reps: s.reps, weight: s.weight })) };
+      })
+    };
+  }
+
+  const WD = ['Ned', 'Pon', 'Uto', 'Sri', 'Čet', 'Pet', 'Sub'];
+  const todayPlan = () => {
+    const id = S().settings.program?.[new Date().getDay()];
+    return id ? S().templates.find(t => t.id === id) || null : null;
+  };
+
+  /* ---------- Skener barkoda ---------- */
+  const scan = { stream: null, timer: null, h5: null, busy: false };
+
+  function scanMsg(t) { const m = document.getElementById('scan-msg'); if (m) m.innerHTML = t; }
+
+  async function openScanner() {
+    closeScanner();
+    const ov = document.createElement('div');
+    ov.className = 'modal'; ov.id = 'scanner';
+    ov.innerHTML = `<div class="modal-box">
+      <div class="card-head"><h2>📷 Skeniraj barkod</h2><button type="button" class="icon-btn" data-act="scanclose" aria-label="Zatvori">✕</button></div>
+      <div class="scan-view" id="scan-view"><video id="scan-video" playsinline muted></video><div class="scan-frame"></div></div>
+      <p class="small muted" id="scan-msg">Usmjeri kameru na barkod proizvoda…</p>
+      <form class="row" data-form="barcode" style="flex-wrap:nowrap"><input name="code" inputmode="numeric" placeholder="ili upiši broj ispod barkoda" pattern="[0-9]{6,14}" required><button class="btn" type="submit">Traži</button></form>
+      <div id="scan-extra"></div></div>`;
+    document.body.appendChild(ov);
+    scan.busy = false;
+    try {
+      if ('BarcodeDetector' in window && (await BarcodeDetector.getSupportedFormats()).includes('ean_13')) {
+        const det = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'] });
+        scan.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+        const v = document.getElementById('scan-video');
+        v.srcObject = scan.stream; await v.play();
+        scan.timer = setInterval(async () => {
+          if (scan.busy || v.readyState < 2) return;
+          try { const r = await det.detect(v); if (r.length) onScanned(r[0].rawValue); } catch (e) {}
+        }, 250);
+      } else {
+        // Safari/iPhone nema ugrađen čitač → biblioteka html5-qrcode (učitava se samo kad zatreba)
+        await loadScript('https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js');
+        const view = document.getElementById('scan-view');
+        view.innerHTML = '<div id="scan-h5"></div>';
+        scan.h5 = new Html5Qrcode('scan-h5', { verbose: false });
+        await scan.h5.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 260, height: 120 } }, (code) => onScanned(code));
+      }
+    } catch (e) {
+      scanMsg('⚠️ Kamera nije dostupna (dopusti pristup kameri ili upiši broj ručno).');
+    }
+  }
+
+  function loadScript(src) {
+    return new Promise((res, rej) => {
+      if ([...document.scripts].some(s => s.src === src)) return res();
+      const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s);
+    });
+  }
+
+  function stopCamera() {
+    clearInterval(scan.timer); scan.timer = null;
+    scan.stream?.getTracks().forEach(t => t.stop()); scan.stream = null;
+    if (scan.h5) { try { scan.h5.stop().catch(() => {}); } catch (e) { /* nije bio pokrenut */ } scan.h5 = null; }
+  }
+  function closeScanner() { stopCamera(); document.getElementById('scanner')?.remove(); }
+
+  function onScanned(code) {
+    if (scan.busy) return;
+    scan.busy = true;
+    navigator.vibrate?.(80);
+    stopCamera();
+    lookupBarcode(String(code).trim());
+  }
+
+  async function lookupBarcode(code) {
+    scan.busy = true;
+    const local = (S().customFoods || []).find(f => f.barcode === code);
+    if (local) { closeScanner(); pickFood({ ...local, cat: 'Moje namirnice', custom: true }); toast(`✅ ${local.name}`); return; }
+    scanMsg(`🔎 Tražim proizvod <span class="num">${esc(code)}</span>…`);
+    try {
+      const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,product_name_hr,generic_name,brands,nutriments,serving_quantity,serving_size`);
+      const d = await r.json();
+      const p = d.product, n = p?.nutriments || {};
+      const kcal = n['energy-kcal_100g'] ?? (n['energy_100g'] != null ? n['energy_100g'] / 4.184 : null);
+      const name = (p?.product_name_hr || p?.product_name || p?.generic_name || '').trim();
+      if (d.status === 1 && kcal != null && name) {
+        const brand = (p.brands || '').split(',')[0].trim();
+        const food = {
+          id: 'u' + Store.uid(), barcode: code,
+          name: brand && !name.toLowerCase().includes(brand.toLowerCase()) ? `${name} (${brand})` : name,
+          kcal: Math.round(kcal), protein: r1(n.proteins_100g || 0), carbs: r1(n.carbohydrates_100g || 0), fat: r1(n.fat_100g || 0),
+          portions: p.serving_quantity ? [{ label: 'porcija', g: +p.serving_quantity }] : []
+        };
+        S().customFoods = S().customFoods || [];
+        S().customFoods.push(food); Store.save();
+        closeScanner(); pickFood({ ...food, cat: 'Moje namirnice', custom: true });
+        toast(`✅ ${food.name}`);
+        return;
+      }
+      unknownProduct(code, name);
+    } catch (e) {
+      unknownProduct(code, '', navigator.onLine === false ? 'Nema interneta. ' : '');
+    }
+  }
+
+  function unknownProduct(code, name, prefix = '') {
+    scanMsg(`${prefix}Proizvod <span class="num">${esc(code)}</span> nije u bazi (ili nema nutritivnih vrijednosti). Prepiši s deklaracije — idući put će se prepoznati odmah.`);
+    document.getElementById('scan-view')?.remove();
+    document.getElementById('scan-extra').innerHTML = `
+      <form data-form="newbarcode" style="margin-top:12px">
+        <input type="hidden" name="code" value="${esc(code)}">
+        <label class="field">Naziv proizvoda<input name="name" required value="${esc(name)}"></label>
+        <div class="form-grid" style="margin-top:10px">
+          <label class="field">kcal / 100 g<input type="number" name="kcal" min="0" step="any" required inputmode="decimal"></label>
+          <label class="field">Proteini<input type="number" name="protein" min="0" step="any" inputmode="decimal"></label>
+          <label class="field">UH<input type="number" name="carbs" min="0" step="any" inputmode="decimal"></label>
+          <label class="field">Masti<input type="number" name="fat" min="0" step="any" inputmode="decimal"></label>
+          <label class="field">Porcija (g)<input type="number" name="portionG" min="0" step="any" inputmode="decimal" placeholder="neobavezno"></label>
+        </div>
+        <div class="row" style="margin-top:12px"><button class="btn primary" type="submit">Spremi i dodaj</button></div>
+      </form>`;
+  }
+
+  function pickFood(f) {
+    if (route() !== 'prehrana') { location.hash = '#/prehrana'; }
+    const form = mealForm();
+    if (!form) return;
+    ui.selFood = f;
+    form.name.value = f.name;
+    form.grams.value = f.portions?.[0]?.g || 100;
+    recalcMeal(); hideSuggest(); updateFoodSel();
+    form.grams.focus(); form.grams.select();
   }
 
   /* ---------- Timer odmora ---------- */
@@ -348,6 +510,19 @@
   /* ============================================================
      PREGLED
      ============================================================ */
+  function todayCard() {
+    const prog = S().settings.program || {};
+    if (!Object.keys(prog).length) return '';
+    const t = todayPlan();
+    const done = S().workouts.some(w => w.date === today());
+    let body;
+    if (done) body = `<span style="font-size:1.6rem">✅</span><div><div class="big">Današnji trening je odrađen</div><div class="small muted">Odlično — sad odmor i proteini.</div></div>`;
+    else if (t) body = `<span style="font-size:1.6rem">🏋️</span><div class="grow"><div class="big">Danas: ${esc(t.name)}</div><div class="small muted">${t.exercises.map(e => esc(e.name)).join(' · ')}</div></div>
+      <span class="spacer"></span><button class="btn primary" data-act="starttoday">Započni trening</button>`;
+    else body = `<span style="font-size:1.6rem">😌</span><div><div class="big">Danas je dan odmora</div><div class="small muted">Oporavak je dio napretka.</div></div>`;
+    return `<div class="card today-card">${body}</div>`;
+  }
+
   function viewDashboard() {
     const st = S().settings, t = today();
     const lw = latestWeight();
@@ -389,6 +564,7 @@
         <p class="muted small" style="margin:4px 0 0">Kreni upisom kilaže u <a href="#/tijelo">Tijelo</a>, postavi ciljeve u <a href="#/postavke">Postavkama</a>,
         ili učitaj primjer podataka da vidiš kako sve izgleda.</p></div><span class="spacer"></span>
         <button class="btn" data-act="demo">Učitaj primjer</button></div></div>` : ''}
+      ${todayCard()}
       <div class="grid grid-4">
         ${stat('Kilaža', lw ? fmt(lw.weight) : '–', 'kg', wDiff != null ? `<span class="${wDiff > 0 ? 'up' : 'down'}">${wDiff > 0 ? '▲' : '▼'} ${fmt(Math.abs(wDiff))} kg</span> u 30 dana` : (st.targetWeight ? `cilj ${fmt(st.targetWeight)} kg` : 'upiši prvo mjerenje'))}
         ${stat('Kalorije danas', fmt(tot.kcal, 0), 'kcal', `${fmt(Math.max(0, st.kcalGoal - tot.kcal), 0)} preostalo`)}
@@ -584,7 +760,7 @@
                   <input list="exnames" data-ex="${i}" data-f="name" value="${esc(ex.name)}" placeholder="Vježba (npr. Čučanj)">
                   <button type="button" class="icon-btn" data-act="rmex" data-i="${i}" title="Ukloni vježbu">✕</button>
                 </div>
-                <div class="last" data-last="${i}">${lastHtml(ex.name, i)}</div>
+                <div class="last" data-last="${i}">${lastHtml(ex.name, i, ex.sets)}</div>
                 <div class="set-row small muted" style="margin-top:10px"><span class="n">Set</span><span>Ponavljanja</span><span>Težina (kg)</span><span></span></div>
                 ${ex.sets.map((s, j) => `
                   <div class="set-row">
@@ -604,6 +780,11 @@
           <p class="hint">Za kardio možeš upisati samo vrstu i trajanje. Za vježbe s vlastitom težinom ostavi težinu 0.</p>
         </form>
         <div class="stack">
+          <div class="card"><div class="card-head"><h2>📅 Tjedni plan</h2></div>
+            <div class="plan">${[1, 2, 3, 4, 5, 6, 0].map(wd => `<div class="plan-row ${wd === new Date().getDay() ? 'today' : ''}"><span class="wd">${WD[wd]}</span>
+              <select data-change="plan" data-wd="${wd}"><option value="">Odmor</option>${S().templates.map(t => `<option value="${t.id}" ${S().settings.program?.[wd] === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></div>`).join('')}</div>
+            <p class="hint">Na Pregledu ćeš svaki dan vidjeti što je na redu. Težine se predlažu same: ako si prošli put odradio sve setove, dodaje se ${fmt(S().settings.increment || 2.5)} kg.</p>
+          </div>
           <div class="card"><div class="card-head"><h2>Napredak u vježbi</h2></div>${progressHtml}</div>
           <div class="card"><div class="card-head"><h2>Povijest</h2><span class="muted small">${history.length} ukupno</span></div>
             ${history.length ? `<div>${history.slice(0, 30).map(w => `
@@ -679,7 +860,9 @@
             <div class="form-grid">
               <label class="field">Obrok<select name="slot">${SLOTS.map(s => `<option ${s === defSlot ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
               <div class="search-wrap" style="grid-column:span 2">
-                <label class="field">Namirnica / jelo<input name="name" required autocomplete="off" placeholder="Traži: piletina, riža, jaje…" data-search="food"></label>
+                <div class="field"><label for="food-name">Namirnica / jelo</label>
+                  <div class="name-row"><input id="food-name" name="name" required autocomplete="off" placeholder="Traži: piletina, riža, jaje…" data-search="food">
+                  <button type="button" class="btn" data-act="scan" title="Skeniraj barkod" aria-label="Skeniraj barkod">📷</button></div></div>
                 <div class="suggest" id="suggest" hidden></div>
               </div>
             </div>
@@ -1089,23 +1272,25 @@
       case 'filllast': {
         e.preventDefault(); syncDraft();
         const ex = ui.draft.exercises[+el.dataset.i];
-        const l = lastSession(ex.name);
-        if (l) ex.sets = l.sets.map(s => ({ reps: s.reps, weight: s.weight }));
+        const sg = suggestSets(ex.name, ex.sets.length ? ex.sets : null);
+        if (sg) ex.sets = sg.sets.map(s => ({ reps: s.reps, weight: s.weight }));
         break;
       }
       case 'loadtpl': {
         const t = st.templates.find(x => x.id === id);
-        syncDraft();
-        ui.draft = {
-          date: ui.draft.date || today(), type: t.type, duration: '', notes: '',
-          exercises: t.exercises.map(ex => {
-            const l = lastSession(ex.name);
-            return { name: ex.name, sets: (l ? l.sets : ex.sets).map(s => ({ reps: s.reps, weight: s.weight })) };
-          })
-        };
-        toast(`Predložak „${t.name}” učitan`);
+        loadTemplate(t);
+        toast(`Predložak „${t.name}” učitan s prijedlogom težina`);
         break;
       }
+      case 'starttoday': {
+        const t = todayPlan(); if (!t) return;
+        loadTemplate(t);
+        location.hash = '#/trening';
+        toast(`${t.name} — težine predložene prema prošlom treningu`);
+        return;
+      }
+      case 'scan': openScanner(); return;
+      case 'scanclose': closeScanner(); return;
       case 'savetpl': {
         syncDraft();
         const exs = ui.draft.exercises.filter(ex => ex.name.trim());
@@ -1209,6 +1394,7 @@
   });
 
   document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.getElementById('scanner')) { closeScanner(); return; }
     if (e.target.matches('[data-search="food"]')) {
       const box = document.getElementById('suggest');
       const open = box && !box.hidden && ui.sug.length;
@@ -1234,6 +1420,11 @@
     switch (c) {
       case 'setdate': if (el.value) { ui[el.dataset.key] = el.value; render(); } return;
       case 'exercise': ui.exercise = el.value; render(); return;
+      case 'plan': {
+        const s = S().settings; s.program = { ...(s.program || {}) };
+        if (el.value) s.program[el.dataset.wd] = el.value; else delete s.program[el.dataset.wd];
+        Store.save(); toast('Plan spremljen'); return;
+      }
       case 'daynum': { const d = Store.day(ui.lifeDate); d[el.dataset.f] = num(el.value); Store.save(); toast('Spremljeno'); render(); return; }
       case 'daynote': { const d = Store.day(ui.lifeDate); d.note = el.value; Store.save(); toast('Dnevnik spremljen'); return; }
       case 'import': {
@@ -1313,6 +1504,21 @@
           .catch(err => { msg.textContent = '⚠️ ' + err.message; btns.forEach(b => b.disabled = false); });
         return;
       }
+      case 'barcode': {
+        const code = fd.code.trim();
+        stopCamera(); lookupBarcode(code);
+        return;
+      }
+      case 'newbarcode': {
+        const g = num(fd.portionG);
+        const food = { id: 'u' + Store.uid(), barcode: fd.code, name: fd.name.trim(), kcal: num(fd.kcal) || 0, protein: num(fd.protein) || 0, carbs: num(fd.carbs) || 0, fat: num(fd.fat) || 0,
+          portions: g ? [{ label: 'porcija', g }] : [] };
+        st.customFoods = st.customFoods || [];
+        st.customFoods.push(food); Store.save();
+        closeScanner(); pickFood({ ...food, cat: 'Moje namirnice', custom: true });
+        toast('Proizvod spremljen u tvoje namirnice');
+        return;
+      }
       case 'customfood': {
         const g = num(fd.portionG);
         st.customFoods = (st.customFoods || []).filter(f => norm(f.name) !== norm(fd.name.trim()));
@@ -1369,7 +1575,7 @@
   document.addEventListener('input', (e) => {
     const t = e.target;
     if (t.closest('form[data-form="workout"]')) syncDraft();
-    if (t.matches('[data-f="name"][data-ex]')) { const h = $view.querySelector(`[data-last="${t.dataset.ex}"]`); if (h) h.innerHTML = lastHtml(t.value, t.dataset.ex); }
+    if (t.matches('[data-f="name"][data-ex]')) { const h = $view.querySelector(`[data-last="${t.dataset.ex}"]`); if (h) h.innerHTML = lastHtml(t.value, t.dataset.ex, ui.draft.exercises[+t.dataset.ex]?.sets); }
     if (t.matches('[data-search="food"]')) {
       if (ui.selFood && t.value !== ui.selFood.name) { ui.selFood = null; updateFoodSel(); }
       renderSuggest(t);
