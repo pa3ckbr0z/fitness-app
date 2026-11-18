@@ -1,6 +1,6 @@
 /* Service worker: aplikacija radi i bez interneta.
    Kad mijenjaš datoteke aplikacije, povećaj VERSION da se nova verzija preuzme. */
-const VERSION = 'v6';
+const VERSION = 'v7';
 const CACHE = 'moj-napredak-' + VERSION;
 const FILES = [
   './',
@@ -20,7 +20,7 @@ const FILES = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES.map(f => new Request(f, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {

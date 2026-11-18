@@ -48,6 +48,14 @@
   <script>
     if ('serviceWorker' in navigator && location.protocol !== 'file:') {
       window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+      // Kad stigne nova verzija aplikacije, osvježi stranicu (osim ako nešto upravo tipkaš)
+      const hadController = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!hadController) return;
+        const a = document.activeElement;
+        if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
+        location.reload();
+      });
     }
   </script>
 </body>
