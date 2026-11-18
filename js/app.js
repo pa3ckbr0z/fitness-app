@@ -128,7 +128,7 @@
     // stvarni tempo zadnja 4 tjedna
     const sw = sortedWeights(), lw = sw[sw.length - 1];
     const ago = sw.filter(w => w.date <= addDays(today(), -28)).pop();
-    const actual = lw && ago ? (lw.weight - ago.weight) / (daysBetween(ago.date, lw.date) / 7) : null;
+    const actual = lw && ago ? trendRate(28) : null;
     let feedback = '';
     if (actual != null && r.dir !== 0) {
       const planned = r.dir * r.realPace;
@@ -480,6 +480,206 @@
     form.grams.focus(); form.grams.select();
   }
 
+  /* ---------- Pravi trend kilaže ----------
+     Eksponencijalno izglađivanje (10% nove vage ulazi u trend), uzima u obzir i dane bez vaganja.
+     Dnevna vaga skače ±1–2 kg zbog vode, soli i hrane — trend pokazuje stvarnu promjenu. */
+  function weightTrend() {
+    const a = 0.1;
+    let t = null, prev = null;
+    return sortedWeights().map(w => {
+      if (t == null) t = w.weight;
+      else { const d = Math.max(1, daysBetween(prev, w.date)); t = t + (1 - Math.pow(1 - a, d)) * (w.weight - t); }
+      prev = w.date;
+      return { date: w.date, w: w.weight, t };
+    });
+  }
+  const trendNow = () => { const p = weightTrend(); return p.length ? p[p.length - 1] : null; };
+  function trendRate(days = 28) {
+    const p = weightTrend();
+    if (p.length < 2) return null;
+    const last = p[p.length - 1];
+    const ref = p.filter(x => x.date <= addDays(last.date, -days)).pop();
+    if (!ref) return null;
+    return (last.t - ref.t) / (daysBetween(ref.date, last.date) / 7);
+  }
+  const trendAt = (date) => { const p = weightTrend().filter(x => x.date <= date).pop(); return p ? p.t : null; };
+
+  /* ---------- Spremnost za trening ---------- */
+  function workoutLoad(w) {
+    if (w.duration) return w.duration;
+    return (w.exercises.reduce((a, e) => a + e.sets.length, 0) * 3) || 30;
+  }
+  function readiness() {
+    const t = today(), st = S().settings, ws = S().workouts;
+    const anySleep = [0, 1, 2].some(i => Store.peekDay(addDays(t, -i))?.sleep != null);
+    if (!ws.length && !anySleep) return null;
+    const loadIn = (from, to) => sum(ws.filter(w => w.date >= from && w.date <= to), workoutLoad);
+    const acute = loadIn(addDays(t, -6), t);
+    const chronic = loadIn(addDays(t, -27), t) / 4;
+    const reasons = [];
+    let score = 100;
+    const sl = [0, 1, 2].map(i => Store.peekDay(addDays(t, -i))?.sleep).filter(v => v != null);
+    if (sl.length) {
+      const avg = sum(sl, v => v) / sl.length, goal = st.sleepGoal || 8, def = goal - avg;
+      if (def > 0.25) { score -= Math.min(35, Math.round(def * 12)); reasons.push(`😴 San: prosjek ${fmt(avg)} h ${sl.length === 1 ? 'zadnje noći' : `zadnje ${sl.length} noći`} (cilj ${fmt(goal)} h)`); }
+      else reasons.push(`😴 Dobro si se naspavao — ${fmt(avg)} h u prosjeku`);
+    } else reasons.push('😴 Nema upisanog sna — upiši ga u Život za točniju procjenu');
+    if (chronic > 0) {
+      const ratio = acute / chronic;
+      if (ratio > 1.3) { score -= Math.min(30, Math.round((ratio - 1.3) * 60) + 8); reasons.push(`🏋️ Zadnjih 7 dana treniraš ${Math.round((ratio - 1) * 100)}% više nego inače`); }
+      else if (ratio < 0.6) reasons.push('🏋️ Zadnjih 7 dana treniraš manje nego inače — tijelo je odmorno');
+      else reasons.push('🏋️ Opterećenje treningom je u tvom uobičajenom rasponu');
+    }
+    let streak = 0;
+    for (let i = 1; i <= 7; i++) { if (ws.some(w => w.date === addDays(t, -i))) streak++; else break; }
+    if (streak >= 3) { score -= (streak - 2) * 8; reasons.push(`📆 Treniraš ${streak} dana zaredom`); }
+    const mood = Store.peekDay(t)?.mood ?? Store.peekDay(addDays(t, -1))?.mood;
+    if (mood != null && mood <= 2) { score -= 10; reasons.push('🙁 Raspoloženje ti je nisko'); }
+    const yk = dayTotals(addDays(t, -1)).kcal;
+    if (yk > 0 && yk < st.kcalGoal * 0.75) { score -= 5; reasons.push(`🍽 Jučer samo ${fmt(yk, 0)} kcal — malo goriva`); }
+    score = Math.max(5, Math.min(100, Math.round(score)));
+    const level = score >= 80 ? { c: 'var(--c1)', t: 'Spreman za jak trening 💪', d: 'Dobar dan za pokušaj rekorda.' }
+      : score >= 60 ? { c: 'var(--c2)', t: 'Normalan trening', d: 'Odradi plan kako je zamišljen.' }
+      : score >= 40 ? { c: 'var(--c3)', t: 'Lakši trening', d: 'Smanji težine ~10% ili izbaci zadnji set.' }
+      : { c: 'var(--warn)', t: 'Preporučen odmor', d: 'Šetnja, istezanje i dobar san danas donose više od treninga.' };
+    return { score, level, reasons };
+  }
+
+  function readinessCard() {
+    const r = readiness();
+    if (!r) return '';
+    return `<div class="card"><div class="card-head"><h2>🔋 Spremnost danas</h2></div>
+      <div class="ready"><div class="ready-score" style="--p:${r.score};--rc:${r.level.c}"><span>${r.score}</span></div>
+        <div><h3>${r.level.t}</h3><div class="small muted">${r.level.d}</div></div></div>
+      <ul class="reasons">${r.reasons.map(x => `<li>${x}</li>`).join('')}</ul></div>`;
+  }
+
+  /* ---------- Detektiv navika ---------- */
+  const DAYS_LOC = ['nedjeljom', 'ponedjeljkom', 'utorkom', 'srijedom', 'četvrtkom', 'petkom', 'subotom'];
+  const avgOf = (arr) => arr.length ? sum(arr, v => v) / arr.length : null;
+
+  // Za svaki trening: koliko je jači/slabiji od prosjeka zadnja 3 treninga istih vježbi (procijenjeni 1RM)
+  function perfSamples() {
+    const byEx = {}, out = [];
+    for (const w of [...S().workouts].sort((a, b) => a.date.localeCompare(b.date))) {
+      const rels = [];
+      for (const e of w.exercises) {
+        const n = e.name.trim().toLowerCase();
+        const top = Math.max(0, ...e.sets.map(s => est1RM(num(s.weight) || 0, num(s.reps) || 0)));
+        if (!top) continue;
+        const h = byEx[n] || (byEx[n] = []);
+        if (h.length >= 2) rels.push(top / avgOf(h.slice(-3)) - 1);
+        h.push(top);
+      }
+      if (rels.length) out.push({ date: w.date, rel: avgOf(rels) });
+    }
+    return out;
+  }
+
+  function insights() {
+    const st = S().settings, t = today(), out = [];
+    const days = Array.from({ length: 90 }, (_, i) => addDays(t, -i - 1)); // zadnjih 90 dana bez današnjeg (nepotpun)
+    const kc = (d) => dayTotals(d).kcal;
+    const fed = days.filter(d => kc(d) > 0);
+
+    // 1) San i snaga
+    const perf = perfSamples().filter(p => Store.peekDay(p.date)?.sleep != null);
+    const good = perf.filter(p => Store.peekDay(p.date).sleep >= 7).map(p => p.rel);
+    const bad = perf.filter(p => Store.peekDay(p.date).sleep < 7).map(p => p.rel);
+    if (good.length >= 3 && bad.length >= 3) {
+      const diff = (avgOf(good) - avgOf(bad)) * 100;
+      if (Math.abs(diff) >= 1.5) out.push({ ic: '😴', s: Math.abs(diff) * 3,
+        title: diff > 0 ? `San te čini jačim: +${fmt(diff)} % snage` : `Zanimljivo: kraći san ti ne smeta na treningu`,
+        text: diff > 0 ? `Nakon 7+ sati sna u vježbama si u prosjeku ${fmt(diff)} % jači nego nakon kraćeg sna (${good.length} vs ${bad.length} treninga).`
+          : `Nakon kraćeg sna bio si u prosjeku ${fmt(-diff)} % jači — vjerojatno slučajnost, prati dalje.` });
+    }
+
+    // 2) Dan u tjednu s najviše kalorija
+    if (fed.length >= 14) {
+      const all = avgOf(fed.map(kc));
+      const byWd = Array.from({ length: 7 }, (_, wd) => fed.filter(d => new Date(d + 'T12:00:00').getDay() === wd).map(kc));
+      let best = null;
+      byWd.forEach((arr, wd) => { if (arr.length >= 2) { const dlt = avgOf(arr) - all; if (!best || Math.abs(dlt) > Math.abs(best.dlt)) best = { wd, dlt }; } });
+      if (best && Math.abs(best.dlt) >= Math.max(150, all * 0.08)) out.push({ ic: '📅', s: Math.abs(best.dlt) / 20,
+        title: `${DAYS_LOC[best.wd][0].toUpperCase() + DAYS_LOC[best.wd].slice(1)} jedeš ${best.dlt > 0 ? 'najviše' : 'najmanje'}`,
+        text: `${DAYS_LOC[best.wd][0].toUpperCase() + DAYS_LOC[best.wd].slice(1)} pojedeš u prosjeku ${fmt(Math.abs(best.dlt), 0)} kcal ${best.dlt > 0 ? 'više' : 'manje'} nego ostalim danima.${best.dlt > 0 ? ' Isplaniraj taj dan unaprijed.' : ''}` });
+      // vikend
+      const we = fed.filter(d => [0, 6].includes(new Date(d + 'T12:00:00').getDay())).map(kc);
+      const wk = fed.filter(d => ![0, 6].includes(new Date(d + 'T12:00:00').getDay())).map(kc);
+      if (we.length >= 3 && wk.length >= 5) {
+        const dlt = avgOf(we) - avgOf(wk);
+        if (dlt >= 250) out.push({ ic: '🍕', s: dlt / 20, title: `Vikendom +${fmt(dlt, 0)} kcal dnevno`,
+          text: `Vikendom pojedeš ${fmt(dlt, 0)} kcal više po danu nego radnim danima — to je ~${fmt(dlt * 2 / 7700 * 52, 1)} kg godišnje.` });
+      }
+    }
+
+    // 3) Kratak san → više hrane
+    const sk = fed.filter(d => Store.peekDay(d)?.sleep != null);
+    const shortS = sk.filter(d => Store.peekDay(d).sleep < 6.5).map(kc), okS = sk.filter(d => Store.peekDay(d).sleep >= 7).map(kc);
+    if (shortS.length >= 3 && okS.length >= 3) {
+      const dlt = avgOf(shortS) - avgOf(okS);
+      if (Math.abs(dlt) >= 150) out.push({ ic: '🌙', s: Math.abs(dlt) / 15,
+        title: dlt > 0 ? `Neispavan pojedeš +${fmt(dlt, 0)} kcal` : `San ne utječe na apetit`,
+        text: dlt > 0 ? `Nakon noći kraće od 6,5 h pojedeš u prosjeku ${fmt(dlt, 0)} kcal više nego nakon 7+ sati. San je i dijeta.`
+          : `Nakon kratkog sna jedeš ${fmt(-dlt, 0)} kcal manje — dobra kontrola!` });
+    }
+
+    // 4) Trening i raspoloženje
+    const md = days.filter(d => Store.peekDay(d)?.mood != null);
+    const trainedOn = (d) => S().workouts.some(w => w.date === d);
+    const mT = md.filter(trainedOn).map(d => Store.peekDay(d).mood), mR = md.filter(d => !trainedOn(d)).map(d => Store.peekDay(d).mood);
+    if (mT.length >= 4 && mR.length >= 4) {
+      const dlt = avgOf(mT) - avgOf(mR);
+      if (Math.abs(dlt) >= 0.3) out.push({ ic: dlt > 0 ? '😄' : '😐', s: Math.abs(dlt) * 25,
+        title: dlt > 0 ? 'Trening ti diže raspoloženje' : 'Dani treninga su ti teži',
+        text: `Raspoloženje na dane treninga: ${fmt(avgOf(mT))}/5, na dane bez treninga: ${fmt(avgOf(mR))}/5.` });
+    }
+
+    // 5) Navika s najvećim utjecajem na kalorije
+    let bestH = null;
+    for (const h of S().habits) {
+      const tracked = fed.filter(d => Store.peekDay(d));
+      const yes = tracked.filter(d => Store.peekDay(d).habits[h.id]).map(kc), no = tracked.filter(d => !Store.peekDay(d).habits[h.id]).map(kc);
+      if (yes.length >= 4 && no.length >= 4) { const dlt = avgOf(no) - avgOf(yes); if (!bestH || Math.abs(dlt) > Math.abs(bestH.dlt)) bestH = { h, dlt }; }
+    }
+    if (bestH && Math.abs(bestH.dlt) >= 150) out.push({ ic: bestH.h.icon || '✅', s: Math.abs(bestH.dlt) / 15,
+      title: `„${esc(bestH.h.name)}” ${bestH.dlt > 0 ? 'ti štedi' : 'ti dodaje'} ${fmt(Math.abs(bestH.dlt), 0)} kcal`,
+      text: `Na dane kad odradiš ovu naviku pojedeš u prosjeku ${fmt(Math.abs(bestH.dlt), 0)} kcal ${bestH.dlt > 0 ? 'manje' : 'više'}.` });
+
+    // 6) Stvarna potrošnja iz tvojih podataka (unos + promjena trenda)
+    const from = addDays(t, -29), to = addDays(t, -1);
+    const win = Array.from({ length: 29 }, (_, i) => addDays(from, i));
+    const fedWin = win.filter(d => kc(d) > 0);
+    const t0 = trendAt(from), t1 = trendAt(to);
+    const wpts = sortedWeights().filter(w => w.date >= from && w.date <= to);
+    if (fedWin.length >= 18 && wpts.length >= 6 && t0 != null && t1 != null) {
+      const span = daysBetween(sortedWeights().filter(w => w.date <= from).pop()?.date || wpts[0].date, wpts[wpts.length - 1].date);
+      if (span >= 14) {
+        const tdee = Math.round((avgOf(fedWin.map(kc)) - (t1 - t0) * KCAL_PER_KG / span) / 10) * 10;
+        const r = calcGoals(profile());
+        const pace = st.pace || 0.5;
+        out.push({ ic: '🔥', s: 60,
+          title: `Tvoja stvarna potrošnja: ~${fmt(tdee, 0)} kcal`,
+          text: `Izračunato iz onoga što jedeš i kako ti se mijenja trend kilaže zadnjih 30 dana${r ? ` (formula procjenjuje ${fmt(r.tdee, 0)} kcal)` : ''}. Za ${fmt(pace, 2)} kg tjedno jedi ~${fmt(Math.round((tdee - pace * KCAL_PER_KG / 7) / 10) * 10, 0)} kcal.` });
+      }
+    }
+
+    // 7) Šum na vagi
+    const tn = trendNow();
+    if (tn && tn.date >= addDays(t, -1) && Math.abs(tn.w - tn.t) >= 0.7) out.push({ ic: '💧', s: 40,
+      title: `Vaga ${tn.w > tn.t ? 'pokazuje više' : 'pokazuje manje'} nego što stvarno jesi`,
+      text: `Zadnje vaganje (${fmt(tn.w)} kg) je ${fmt(Math.abs(tn.w - tn.t))} kg ${tn.w > tn.t ? 'iznad' : 'ispod'} trenda (${fmt(tn.t)} kg). To je voda, sol ili hrana u želucu — ne mast. Gledaj trend.` });
+
+    return out.sort((a, b) => b.s - a.s);
+  }
+
+  function insightsCard() {
+    const list = insights();
+    const body = list.length ? `<div class="insights">${list.slice(0, 6).map(i => `<div class="insight"><span class="ic">${i.ic}</span><div><b>${i.title}</b><p>${i.text}</p></div></div>`).join('')}</div>`
+      : `<p class="small muted" style="margin:0">Još skupljam podatke. Uvidi se pojave kad 2–3 tjedna redovito upisuješ hranu, san, raspoloženje, navike i treninge — što više upisuješ, to ih više otkrijem.</p>`;
+    return `<div class="card"><div class="card-head"><h2>🕵️ Detektiv navika</h2><span class="muted small">veze u tvojim podacima</span></div>${body}</div>`;
+  }
+
   function movingAvg(points, win = 7) {
     return points.map((p, i) => {
       const from = addDays(p.x, -win + 1);
@@ -527,8 +727,8 @@
     const st = S().settings, t = today();
     const lw = latestWeight();
     const sw = sortedWeights();
-    const monthAgo = sw.filter(w => w.date <= addDays(t, -30)).pop() || sw[0];
-    const wDiff = lw && monthAgo && lw !== monthAgo ? lw.weight - monthAgo.weight : null;
+    const tr30 = trendRate(30);
+    const wDiff = tr30 != null ? tr30 * 30 / 7 : null; // promjena trenda u 30 dana
     const tot = dayTotals(t);
     const ws = weekStart(t);
     const weekWorkouts = S().workouts.filter(w => w.date >= ws && w.date <= t);
@@ -565,6 +765,7 @@
         ili učitaj primjer podataka da vidiš kako sve izgleda.</p></div><span class="spacer"></span>
         <button class="btn" data-act="demo">Učitaj primjer</button></div></div>` : ''}
       ${todayCard()}
+      <div class="grid grid-2" style="margin-bottom:16px;align-items:start">${readinessCard()}${insightsCard()}</div>
       <div class="grid grid-4">
         ${stat('Kilaža', lw ? fmt(lw.weight) : '–', 'kg', wDiff != null ? `<span class="${wDiff > 0 ? 'up' : 'down'}">${wDiff > 0 ? '▲' : '▼'} ${fmt(Math.abs(wDiff))} kg</span> u 30 dana` : (st.targetWeight ? `cilj ${fmt(st.targetWeight)} kg` : 'upiši prvo mjerenje'))}
         ${stat('Kalorije danas', fmt(tot.kcal, 0), 'kcal', `${fmt(Math.max(0, st.kcalGoal - tot.kcal), 0)} preostalo`)}
@@ -920,20 +1121,20 @@
     const waistPts = sw.filter(w => w.date >= from && w.waist != null).map(w => ({ x: w.date, y: w.waist }));
 
     // Tempo zadnjih 4 tjedna
-    const ago = sw.filter(w => w.date <= addDays(today(), -28)).pop();
-    const rate = lw && ago ? (lw.weight - ago.weight) / (daysBetween(ago.date, lw.date) / 7) : null;
+    const rate = trendRate(28);
+    const tn = trendNow();
     let eta = '';
-    if (rate && st.targetWeight && lw) {
-      const left = st.targetWeight - lw.weight;
+    if (rate && st.targetWeight && tn) {
+      const left = st.targetWeight - tn.t;
       if (Math.sign(left) === Math.sign(rate) && Math.abs(left) > 0.1) eta = `~${Math.ceil(Math.abs(left / rate))} tj. do cilja ovim tempom`;
     }
 
     return `
       <div class="page-head"><div><h1>Tijelo</h1><p class="muted">Kilaža, postotak masti i opseg struka.</p></div></div>
       <div class="grid grid-4">
-        ${stat('Trenutno', lw ? fmt(lw.weight) : '–', 'kg', lw ? dayLabel(lw.date) : '')}
+        ${stat('Trend kilaže', tn ? fmt(tn.t) : '–', 'kg', lw ? `vaga ${dayLabel(lw.date).toLowerCase()}: ${fmt(lw.weight)} kg` : '')}
         ${stat('Ukupna promjena', lw && first ? (lw.weight - first.weight > 0 ? '+' : '') + fmt(lw.weight - first.weight) : '–', 'kg', first ? `od ${shortDate(first.date)}` : '')}
-        ${stat('Tempo', rate != null ? (rate > 0 ? '+' : '') + fmt(rate, 2) : '–', 'kg/tj', eta || 'zadnja 4 tjedna')}
+        ${stat('Tempo (trend)', rate != null ? (rate > 0 ? '+' : '') + fmt(rate, 2) : '–', 'kg/tj', eta || 'zadnja 4 tjedna')}
         ${stat('BMI', bmi ? fmt(bmi) : '–', '', bmi ? bmiTxt + (st.targetWeight && lw ? ` · do cilja ${fmt(Math.abs(lw.weight - st.targetWeight))} kg` : '') : 'postavi visinu')}
       </div>
       <div class="grid grid-2" style="margin-top:16px;align-items:start">
@@ -968,9 +1169,9 @@
               <div class="tabs">${[[30, '30 d'], [90, '3 mj'], [365, '1 g'], [0, 'Sve']].map(([v, l]) => `<button data-act="range" data-v="${v}" class="${range === v ? 'active' : ''}">${l}</button>`).join('')}</div></div>
             ${Charts.line([
               { name: 'Kilaža', color: 'var(--c1)', points: pts },
-              ...(pts.length >= 5 ? [{ name: 'Prosjek 7 d', color: 'var(--c3)', points: movingAvg(pts).map(p => ({ x: p.x, y: Math.round(p.y * 10) / 10 })) }] : [])
+              ...(pts.length >= 3 ? [{ name: 'Trend', color: 'var(--c3)', points: weightTrend().filter(p => p.date >= from).map(p => ({ x: p.date, y: Math.round(p.t * 10) / 10 })) }] : [])
             ], { unit: 'kg', goal: st.targetWeight, goalLabel: 'Cilj', height: 260 })}
-            ${pts.length >= 5 ? `<div class="legend" style="margin-top:8px"><span><i style="background:var(--c1)"></i>Dnevno mjerenje</span><span><i style="background:var(--c3)"></i>Prosjek 7 dana (pravi trend)</span></div>` : ''}
+            ${pts.length >= 3 ? `<div class="legend" style="margin-top:8px"><span><i style="background:var(--c1)"></i>Vaga</span><span><i style="background:var(--c3)"></i>Pravi trend (bez skokova od vode i soli)</span></div>` : ''}
           </div>
           ${fatPts.length ? `<div class="card"><div class="card-head"><h2>Postotak masti</h2></div>${Charts.line([{ name: 'Mast', color: 'var(--c4)', points: fatPts }], { unit: '%', height: 170 })}</div>` : ''}
           ${waistPts.length ? `<div class="card"><div class="card-head"><h2>Opseg struka</h2></div>${Charts.line([{ name: 'Struk', color: 'var(--c2)', points: waistPts }], { unit: 'cm', height: 170 })}</div>` : ''}
