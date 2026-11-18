@@ -219,7 +219,7 @@ tr:last-child td { border-bottom: 0; }
 .counter .val { font-size: 1.4rem; font-weight: 700; min-width: 40px; text-align: center; font-variant-numeric: tabular-nums; }
 
 /* Heatmap */
-.heat { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.heat { max-width: 320px; display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
 .heat div { aspect-ratio: 1; border-radius: 4px; background: var(--surface-2); }
 .heat .l1 { background: color-mix(in srgb, var(--accent) 30%, var(--surface-2)); }
 .heat .l2 { background: color-mix(in srgb, var(--accent) 60%, var(--surface-2)); }
@@ -308,6 +308,32 @@ tr:last-child td { border-bottom: 0; }
 .timer.done button { color: var(--accent-text); }
 @keyframes pulse { 50% { transform: scale(1.06); } }
 @media (max-width: 760px) { .timer { right: 50%; transform: translateX(50%); bottom: 84px; } .timer.done { animation: none; } }
+
+/* Kalkulator ciljeva */
+.calc { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
+@media (max-width: 900px) { .calc { grid-template-columns: 1fr; } }
+.calc-out { background: var(--surface-2); border-radius: 12px; padding: 18px; }
+.calc-big { font-size: 2.4rem; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.calc-big small { font-size: 1rem; font-weight: 500; color: var(--muted); margin-left: 4px; }
+.calc-lines { margin-top: 14px; display: grid; gap: 6px; font-size: .9rem; }
+.calc-lines div { display: flex; justify-content: space-between; gap: 10px; }
+.calc-lines span:last-child { font-variant-numeric: tabular-nums; font-weight: 600; }
+.macros3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
+.macros3 div { background: var(--surface); border-radius: 10px; padding: 10px; text-align: center; }
+.macros3 b { display: block; font-size: 1.2rem; font-variant-numeric: tabular-nums; }
+.macros3 span { font-size: .75rem; color: var(--muted); }
+.warn { margin-top: 12px; padding: 10px 12px; border-radius: 10px; font-size: .85rem; background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--text); }
+.good { margin-top: 12px; padding: 10px 12px; border-radius: 10px; font-size: .85rem; background: var(--accent-soft); color: var(--text); }
+
+/* Tjedni izvještaj */
+.report { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 900px) { .report { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.report > div { background: var(--surface-2); border-radius: 12px; padding: 12px 14px; min-width: 0; }
+.report .label { font-size: .78rem; color: var(--muted); font-weight: 500; }
+.report .v { font-size: 1.3rem; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.report .v small { font-size: .8rem; font-weight: 500; color: var(--muted); margin-left: 2px; }
+.report .d { font-size: .78rem; margin-top: 2px; color: var(--muted); }
+.highlights { margin: 14px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: .9rem; }
 
 details summary { cursor: pointer; font-weight: 600; }
 .hint { font-size: .8rem; color: var(--muted); margin-top: 8px; }

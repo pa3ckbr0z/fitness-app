@@ -35,6 +35,7 @@
     foodDate: today(),
     lifeDate: today(),
     weightRange: 90,
+    reportWeek: null, // ponedjeljak tjedna u izvještaju (null = zadnji završeni tjedan)
     exercise: null,
     selFood: null,   // odabrana namirnica iz baze u formi za obrok
     sug: [],         // trenutni rezultati pretrage
@@ -74,6 +75,95 @@
   }
   const exerciseNames = () => [...new Set(S().workouts.flatMap(w => w.exercises.map(e => e.name.trim())).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'hr'));
   const est1RM = (w, r) => r <= 1 ? w : w * (1 + r / 30); // Epley
+
+  /* ---------- Kalkulator ciljeva ---------- */
+  const ACTIVITY = [
+    [1.2, 'Sjedilački — uredski posao, bez treninga'],
+    [1.375, 'Lagano aktivan — 1–3 treninga tjedno'],
+    [1.55, 'Umjereno aktivan — 3–5 treninga tjedno'],
+    [1.725, 'Vrlo aktivan — 6–7 treninga ili fizički posao'],
+    [1.9, 'Ekstremno aktivan — težak fizički posao + trening']
+  ];
+  const PACES = [[0.25, 'Polako — 0,25 kg tjedno'], [0.5, 'Umjereno — 0,5 kg tjedno (preporuka)'], [0.75, 'Brže — 0,75 kg tjedno'], [1, 'Agresivno — 1 kg tjedno']];
+  const KCAL_PER_KG = 7700;
+
+  /** Mifflin-St Jeor + aktivnost → dnevne kalorije i makronutrijenti za zadani cilj. */
+  function calcGoals(p) {
+    const { sex, age, height, weight, target, activity, pace } = p;
+    if (!age || !height || !weight || !target || !activity) return null;
+    const bmr = 10 * weight + 6.25 * height - 5 * age + (sex === 'f' ? -161 : 5);
+    const tdee = bmr * activity;
+    const diff = target - weight;
+    const dir = Math.abs(diff) < 0.5 ? 0 : Math.sign(diff); // -1 mršavljenje, +1 dobivanje
+    const warns = [];
+    let wantPace = dir === 0 ? 0 : (pace || 0.5);
+    if (dir > 0 && wantPace > 0.5) { wantPace = 0.5; warns.push('Za dobivanje mase preporučeno je najviše ~0,5 kg tjedno (inače se dobiva uglavnom mast) — tempo je ograničen na 0,5 kg.'); }
+    if (dir < 0 && wantPace > weight * 0.01) warns.push(`Tempo veći od 1% tjelesne mase tjedno (${fmt(weight * 0.01)} kg) teško je održati i povećava gubitak mišića.`);
+    let kcal = tdee + dir * wantPace * KCAL_PER_KG / 7;
+    const floor = Math.max(bmr, sex === 'f' ? 1200 : 1500);
+    if (dir < 0 && kcal < floor) {
+      kcal = floor;
+      warns.push(`Kalorije su ograničene na ${fmt(Math.round(floor / 10) * 10, 0)} kcal (ne ispod bazalnog metabolizma) — zato je tempo malo sporiji.`);
+    }
+    kcal = Math.round(kcal / 10) * 10;
+    const realPace = Math.abs(kcal - tdee) * 7 / KCAL_PER_KG;
+    const ref = dir < 0 ? target : weight; // proteini prema ciljnoj masi kod mršavljenja
+    const protein = Math.round(ref * (dir < 0 ? 2.0 : 1.8));
+    const fat = Math.max(Math.round(ref * 0.8), Math.round(kcal * 0.22 / 9));
+    const carbs = Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4));
+    const weeks = dir === 0 || realPace === 0 ? 0 : Math.abs(diff) / realPace;
+    const eta = weeks ? addDays(today(), Math.round(weeks * 7)) : null;
+    return { bmr: Math.round(bmr), tdee: Math.round(tdee), kcal, delta: Math.round(kcal - tdee), protein, fat, carbs, dir, realPace, weeks, eta, warns, diff };
+  }
+
+  const profile = (over = {}) => {
+    const st = S().settings, lw = latestWeight();
+    return { sex: st.sex, age: st.age, height: st.height, weight: lw ? lw.weight : null, target: st.targetWeight, activity: st.activity, pace: st.pace, ...over };
+  };
+
+  function calcResultHtml(p, r) {
+    if (!r) return `<div class="empty" style="padding:30px 8px">Upiši dob, visinu, trenutnu i ciljnu kilažu — kalorije se izračunaju odmah.</div>`;
+    const mon = (s) => { const d = new Date(s + 'T12:00:00'); return `${MONTHS[d.getMonth()]} ${d.getFullYear()}.`; };
+    const goal = r.dir < 0 ? 'mršavljenje' : r.dir > 0 ? 'dobivanje mase' : 'održavanje';
+    // stvarni tempo zadnja 4 tjedna
+    const sw = sortedWeights(), lw = sw[sw.length - 1];
+    const ago = sw.filter(w => w.date <= addDays(today(), -28)).pop();
+    const actual = lw && ago ? (lw.weight - ago.weight) / (daysBetween(ago.date, lw.date) / 7) : null;
+    let feedback = '';
+    if (actual != null && r.dir !== 0) {
+      const planned = r.dir * r.realPace;
+      if (r.dir < 0 && actual > planned + 0.2) feedback = `<div class="warn">📉 Zadnja 4 tjedna mijenjaš se ${fmt(actual, 2)} kg/tj, a plan je ${fmt(planned, 2)} kg/tj. Ako se to nastavi još 1–2 tjedna, smanji unos za ~100–150 kcal ili dodaj kretanja.</div>`;
+      else if (r.dir < 0 && actual < planned - 0.4) feedback = `<div class="warn">⚡ Gubiš brže od plana (${fmt(actual, 2)} kg/tj). Pazi da ne izgubiš mišiće — možeš dodati ~100–200 kcal.</div>`;
+      else feedback = `<div class="good">✅ Stvarni tempo zadnja 4 tjedna: ${fmt(actual, 2)} kg/tj — u skladu s planom.</div>`;
+    }
+    return `
+      <div class="small muted">Dnevni unos za ${goal}</div>
+      <div class="calc-big">${fmt(r.kcal, 0)}<small>kcal</small></div>
+      <div class="macros3">
+        <div><b>${r.protein} g</b><span>Proteini</span></div>
+        <div><b>${r.carbs} g</b><span>Ugljikohidrati</span></div>
+        <div><b>${r.fat} g</b><span>Masti</span></div>
+      </div>
+      <div class="calc-lines">
+        <div><span class="muted">Bazalni metabolizam (BMR)</span><span>${fmt(r.bmr, 0)} kcal</span></div>
+        <div><span class="muted">Dnevna potrošnja (održavanje)</span><span>${fmt(r.tdee, 0)} kcal</span></div>
+        <div><span class="muted">${r.delta < 0 ? 'Deficit' : r.delta > 0 ? 'Suficit' : 'Razlika'}</span><span>${r.delta > 0 ? '+' : ''}${fmt(r.delta, 0)} kcal / dan</span></div>
+        ${r.dir ? `<div><span class="muted">Tempo</span><span>${r.dir < 0 ? '−' : '+'}${fmt(r.realPace, 2)} kg tjedno</span></div>
+        <div><span class="muted">${fmt(p.weight)} → ${fmt(p.target)} kg</span><span>~${Math.ceil(r.weeks)} tjedana · oko ${mon(r.eta)}</span></div>` : ''}
+      </div>
+      ${r.warns.map(w => `<div class="warn">⚠️ ${w}</div>`).join('')}
+      ${feedback}`;
+  }
+
+  function readCalcForm(form) {
+    return { sex: form.sex.value, age: num(form.age.value), height: num(form.height.value), weight: num(form.weight.value),
+      target: num(form.target.value), activity: num(form.activity.value), pace: num(form.pace.value) };
+  }
+
+  function applyGoals(r) {
+    const s = S().settings;
+    s.kcalGoal = r.kcal; s.proteinGoal = r.protein; s.carbsGoal = r.carbs; s.fatGoal = r.fat;
+  }
 
   /* ---------- Prošli put (zadnji trening s istom vježbom) ---------- */
   function lastSession(name) {
@@ -323,6 +413,106 @@
         <div class="card"><div class="card-head"><h2>Aktivnost · 5 tjedana</h2></div>
           <div class="heat">${heat}</div>
           <div class="legend" style="margin-top:12px"><span><i style="background:var(--surface-2)"></i>ništa</span><span><i class="" style="background:color-mix(in srgb,var(--accent) 30%,var(--surface-2))"></i>navike</span><span><i style="background:color-mix(in srgb,var(--accent) 60%,var(--surface-2))"></i>trening</span><span><i style="background:var(--accent)"></i>oboje</span></div></div>
+      </div>
+      ${weeklyReport()}`;
+  }
+
+  /* ============================================================
+     TJEDNI IZVJEŠTAJ
+     ============================================================ */
+  function weekStats(ws) {
+    const we = addDays(ws, 6), t = today();
+    const inW = (d) => d >= ws && d <= we;
+    const days = Array.from({ length: 7 }, (_, i) => addDays(ws, i)).filter(d => d <= t);
+    const weights = S().weights.filter(w => inW(w.date));
+    const fed = days.filter(d => mealsOn(d).length);
+    const wos = S().workouts.filter(w => inW(w.date));
+    const sets = wos.flatMap(w => w.exercises.flatMap(e => e.sets));
+    const hN = S().habits.length;
+    const sleeps = days.map(d => Store.peekDay(d)?.sleep).filter(v => v != null);
+    const steps = days.map(d => Store.peekDay(d)?.steps).filter(v => v != null);
+    // Rekordi: najveća težina u tjednu veća od svega prije tog tjedna
+    const prs = [];
+    const best = {};
+    for (const w of wos) for (const e of w.exercises) {
+      const top = Math.max(0, ...e.sets.map(s => s.weight || 0));
+      const n = e.name.trim();
+      if (top && (!best[n] || top > best[n])) best[n] = top;
+    }
+    for (const [n, top] of Object.entries(best)) {
+      const prior = S().workouts.filter(w => w.date < ws).flatMap(w => w.exercises.filter(e => e.name.trim() === n).flatMap(e => e.sets.map(s => s.weight || 0)));
+      if (prior.length && top > Math.max(...prior)) prs.push({ name: n, weight: top, prev: Math.max(...prior) });
+    }
+    return {
+      days: days.length,
+      weight: weights.length ? sum(weights, w => w.weight) / weights.length : null,
+      kcal: fed.length ? sum(fed, d => dayTotals(d).kcal) / fed.length : null,
+      protein: fed.length ? sum(fed, d => dayTotals(d).protein) / fed.length : null,
+      fedDays: fed.length,
+      workouts: wos.length,
+      minutes: sum(wos, w => w.duration),
+      volume: sum(sets, s => (s.reps || 0) * (s.weight || 0)),
+      habits: hN && days.length ? sum(days, d => habitsDone(d)) / (hN * days.length) : null,
+      sleep: sleeps.length ? sum(sleeps, v => v) / sleeps.length : null,
+      steps: steps.length ? sum(steps, v => v) / steps.length : null,
+      prs
+    };
+  }
+
+  function weeklyReport() {
+    const st = S().settings;
+    const curWs = weekStart(today());
+    const ws = ui.reportWeek || addDays(curWs, -7);
+    const a = weekStats(ws), b = weekStats(addDays(ws, -7));
+    const isCurrent = ws === curWs;
+    const lw = latestWeight();
+    const loseGoal = st.targetWeight && lw ? st.targetWeight < lw.weight : true;
+
+    // promjena u odnosu na prošli tjedan; good = smjer koji je dobar
+    const delta = (x, y, d, unit, good) => {
+      if (x == null || y == null) return `<div class="d">prošli tj. –</div>`;
+      const diff = x - y;
+      if (Math.abs(diff) < Math.pow(10, -d) / 2) return `<div class="d">= kao prošli tjedan</div>`;
+      const cls = good == null ? '' : (good === 'down' ? diff < 0 : diff > 0) ? 'down' : 'up';
+      return `<div class="d"><span class="${cls}">${diff > 0 ? '▲' : '▼'} ${fmt(Math.abs(diff), d)}${unit}</span> vs prošli tj.</div>`;
+    };
+    const tile = (label, v, unit, dHtml) => `<div><div class="label">${label}</div><div class="v">${v}${unit ? `<small>${unit}</small>` : ''}</div>${dHtml}</div>`;
+
+    // Kratki zaključci
+    const hl = [];
+    if (a.weight != null && b.weight != null) {
+      const dw = a.weight - b.weight;
+      const okDir = loseGoal ? dw < 0 : dw > 0;
+      hl.push(`${okDir ? '✅' : Math.abs(dw) < 0.1 ? '➖' : '⚠️'} Prosječna kilaža ${dw < 0 ? 'pala' : 'porasla'} za ${fmt(Math.abs(dw), 2)} kg${st.pace ? ` (plan ${loseGoal ? '−' : '+'}${fmt(st.pace, 2)} kg)` : ''}.`);
+    }
+    if (a.kcal != null) {
+      const off = (a.kcal - st.kcalGoal) / st.kcalGoal;
+      hl.push(`${Math.abs(off) <= 0.07 ? '✅' : '⚠️'} Kalorije u prosjeku ${fmt(a.kcal, 0)} kcal — ${Math.abs(off) <= 0.07 ? 'u skladu s ciljem' : off > 0 ? `${fmt(a.kcal - st.kcalGoal, 0)} kcal iznad cilja` : `${fmt(st.kcalGoal - a.kcal, 0)} kcal ispod cilja`}${a.fedDays < a.days ? ` (upisano ${a.fedDays} od ${a.days} dana)` : ''}.`);
+    }
+    if (a.protein != null && st.proteinGoal) hl.push(`${a.protein >= st.proteinGoal * 0.9 ? '✅' : '⚠️'} Proteini ${fmt(a.protein, 0)} g dnevno (cilj ${st.proteinGoal} g).`);
+    hl.push(`${a.workouts >= st.workoutsPerWeek ? '✅' : isCurrent ? '⏳' : '⚠️'} ${a.workouts} od ${st.workoutsPerWeek} planiranih treninga.`);
+    if (a.prs.length) hl.push(`🏆 Novi rekordi: ${a.prs.map(p => `${esc(p.name)} ${fmt(p.weight)} kg (+${fmt(p.weight - p.prev)})`).join(', ')}.`);
+
+    const label = `${shortDate(ws)} – ${shortDate(addDays(ws, 6))}`;
+    return `
+      <div class="card" style="margin-top:16px">
+        <div class="card-head"><h2>📊 Tjedni izvještaj</h2>
+          <div class="datenav">
+            <button class="btn sm" data-act="repweek" data-n="-7" aria-label="Prethodni tjedan">‹</button>
+            <span class="small num" style="min-width:100px;text-align:center;font-weight:600">${isCurrent ? 'Ovaj tjedan' : label}</span>
+            <button class="btn sm" data-act="repweek" data-n="7" aria-label="Sljedeći tjedan" ${isCurrent ? 'disabled' : ''}>›</button>
+          </div></div>
+        <div class="report">
+          ${tile('Prosječna kilaža', a.weight != null ? fmt(a.weight) : '–', 'kg', delta(a.weight, b.weight, 1, ' kg', loseGoal ? 'down' : 'up'))}
+          ${tile('Kalorije / dan', a.kcal != null ? fmt(a.kcal, 0) : '–', 'kcal', delta(a.kcal, b.kcal, 0, ''))}
+          ${tile('Proteini / dan', a.protein != null ? fmt(a.protein, 0) : '–', 'g', delta(a.protein, b.protein, 0, ' g', 'up'))}
+          ${tile('Treninzi', a.workouts, `/ ${st.workoutsPerWeek}`, delta(a.workouts, b.workouts, 0, '', 'up'))}
+          ${tile('Volumen', fmt(a.volume / 1000), 't', `<div class="d">${fmt(a.minutes / 60)} h treninga</div>`)}
+          ${tile('Navike', a.habits != null ? Math.round(a.habits * 100) : '–', '%', delta(a.habits != null ? a.habits * 100 : null, b.habits != null ? b.habits * 100 : null, 0, ' %', 'up'))}
+          ${tile('San', a.sleep != null ? fmt(a.sleep) : '–', 'h', delta(a.sleep, b.sleep, 1, ' h', 'up'))}
+          ${tile('Koraci / dan', a.steps != null ? fmt(a.steps, 0) : '–', '', delta(a.steps, b.steps, 0, '', 'up'))}
+        </div>
+        <ul class="highlights">${hl.map(h => `<li>${h}</li>`).join('')}</ul>
       </div>`;
   }
 
@@ -478,7 +668,7 @@
       <div class="grid grid-2" style="align-items:start">
         <div class="stack">
           <div class="card">
-            <div class="card-head"><h2>Dnevni unos</h2><span class="tag ${tot.kcal > st.kcalGoal * 1.05 ? '' : 'accent'}">${fmt(Math.round(st.kcalGoal - tot.kcal), 0)} kcal ${tot.kcal > st.kcalGoal ? 'iznad cilja' : 'preostalo'}</span></div>
+            <div class="card-head"><h2>Dnevni unos</h2><a class="small" href="#/postavke" style="margin-left:auto">🎯 Ciljevi</a><span class="tag ${tot.kcal > st.kcalGoal * 1.05 ? '' : 'accent'}">${fmt(Math.round(st.kcalGoal - tot.kcal), 0)} kcal ${tot.kcal > st.kcalGoal ? 'iznad cilja' : 'preostalo'}</span></div>
             ${progress('Kalorije', tot.kcal, st.kcalGoal, 'kcal')}
             ${progress('Proteini', tot.protein, st.proteinGoal, 'g')}
             ${progress('Ugljikohidrati', tot.carbs, st.carbsGoal, 'g')}
@@ -661,25 +851,52 @@
   /* ============================================================
      POSTAVKE
      ============================================================ */
+  function calcCard() {
+    const st = S().settings, p = profile(), r = calcGoals(p);
+    const opt = (list, cur) => list.map(([v, l]) => `<option value="${v}" ${+cur === v ? 'selected' : ''}>${l}</option>`).join('');
+    return `
+      <form class="card" data-form="calc" id="calc">
+        <div class="card-head"><h2>🎯 Kalkulator ciljeva</h2><span class="muted small">kalorije i makronutrijenti prema tvom cilju</span></div>
+        <div class="calc">
+          <div>
+            <div class="form-grid">
+              <label class="field">Spol<select name="sex"><option value="m" ${st.sex !== 'f' ? 'selected' : ''}>Muško</option><option value="f" ${st.sex === 'f' ? 'selected' : ''}>Žensko</option></select></label>
+              <label class="field">Dob (god.)<input type="number" name="age" min="14" max="100" inputmode="numeric" value="${st.age ?? ''}" required></label>
+              <label class="field">Visina (cm)<input type="number" name="height" min="120" max="230" inputmode="numeric" value="${st.height ?? ''}" required></label>
+            </div>
+            <div class="form-grid" style="margin-top:12px">
+              <label class="field">Trenutna kilaža (kg)<input type="number" name="weight" step="0.1" min="30" max="350" inputmode="decimal" value="${p.weight ?? ''}" required></label>
+              <label class="field">Ciljna kilaža (kg)<input type="number" name="target" step="0.1" min="30" max="350" inputmode="decimal" value="${st.targetWeight ?? ''}" required></label>
+            </div>
+            <label class="field" style="margin-top:12px">Aktivnost<select name="activity">${opt(ACTIVITY, st.activity)}</select></label>
+            <label class="field" style="margin-top:12px">Tempo<select name="pace">${opt(PACES, st.pace)}</select></label>
+            <label class="check-label" style="margin-top:14px"><input type="checkbox" name="autoGoals" ${st.autoGoals ? 'checked' : ''}> Automatski prilagodi kalorije kad upišem novu kilažu</label>
+            <div class="row" style="margin-top:14px"><button class="btn primary" type="submit">Primijeni ciljeve</button></div>
+            <p class="hint">Izračun: Mifflin-St Jeor formula × razina aktivnosti, 1 kg masti ≈ 7700 kcal. Proteini ~2 g po kg ciljne mase čuvaju mišiće. Ovo je procjena — prati kilažu 2–3 tjedna i prilagodi.</p>
+          </div>
+          <div class="calc-out" id="calc-result">${calcResultHtml(p, r)}</div>
+        </div>
+      </form>`;
+  }
+
   function viewSettings() {
     const st = S().settings;
     const f = (name, label, attrs = '') => `<label class="field">${label}<input type="number" name="${name}" value="${st[name] ?? ''}" ${attrs}></label>`;
     return `
       <div class="page-head"><div><h1>Postavke</h1><p class="muted">Ciljevi, navike i tvoji podaci.</p></div></div>
-      <div class="grid grid-2" style="align-items:start">
+      ${calcCard()}
+      <div class="grid grid-2" style="align-items:start;margin-top:16px">
         <form class="card" data-form="settings">
           <div class="card-head"><h2>Profil i ciljevi</h2></div>
           <div class="form-grid">
             <label class="field">Ime<input name="name" value="${esc(st.name)}" placeholder="Kako da te zovem?"></label>
-            ${f('height', 'Visina (cm)', 'min="100" max="250"')}
-            ${f('targetWeight', 'Ciljna kilaža (kg)', 'step="0.1"')}
             ${f('workoutsPerWeek', 'Treninga tjedno', 'min="0" max="14"')}
           </div>
           <h3 style="margin:18px 0 10px">Prehrana (dnevno)</h3>
           <div class="form-grid">
             ${f('kcalGoal', 'Kalorije')}${f('proteinGoal', 'Proteini (g)')}${f('carbsGoal', 'UH (g)')}${f('fatGoal', 'Masti (g)')}
           </div>
-          <p class="hint">Savjet: proteini ~1,6–2,2 g po kg tjelesne mase. Za mršavljenje kalorije ~300–500 ispod održavanja.</p>
+          <p class="hint">Ove vrijednosti postavlja kalkulator iznad${st.autoGoals ? ' (i prilagođava ih pri svakoj novoj kilaži)' : ''}. Možeš ih i ručno promijeniti.</p>
           <h3 style="margin:18px 0 10px">Svakodnevno</h3>
           <div class="form-grid">
             ${f('waterGoal', 'Voda (čaše)')}${f('sleepGoal', 'San (h)', 'step="0.5"')}${f('stepsGoal', 'Koraci')}
@@ -924,6 +1141,12 @@
       case 'delmeal': st.meals = st.meals.filter(m => m.id !== id); Store.save(); break;
       // Tijelo
       case 'range': ui.weightRange = +el.dataset.v; break;
+      case 'repweek': {
+        const cur = weekStart(today());
+        const next = addDays(ui.reportWeek || addDays(cur, -7), +el.dataset.n);
+        ui.reportWeek = next > cur ? cur : next;
+        break;
+      }
       case 'delweight':
         if (!confirm('Obrisati ovo mjerenje?')) return;
         st.weights = st.weights.filter(w => w.id !== id); Store.save(); break;
@@ -1049,13 +1272,36 @@
       case 'weight': {
         const entry = { id: Store.uid(), date: fd.date, weight: num(fd.weight), bodyFat: num(fd.bodyFat), waist: num(fd.waist), note: fd.note.trim() };
         st.weights = st.weights.filter(w => w.date !== fd.date);
-        st.weights.push(entry); Store.save(); toast('Mjerenje spremljeno');
+        st.weights.push(entry);
+        let msg = 'Mjerenje spremljeno';
+        if (st.settings.autoGoals) {
+          const before = st.settings.kcalGoal;
+          const r = calcGoals(profile());
+          if (r) { applyGoals(r); if (r.kcal !== before) msg = `Spremljeno · novi cilj ${fmt(r.kcal, 0)} kcal`; }
+        }
+        Store.save(); toast(msg);
+        break;
+      }
+      case 'calc': {
+        const p = readCalcForm(form), r = calcGoals(p);
+        if (!r) { alert('Upiši dob, visinu, trenutnu i ciljnu kilažu.'); return; }
+        const s = st.settings;
+        s.sex = p.sex; s.age = p.age; s.height = p.height; s.targetWeight = p.target; s.activity = p.activity; s.pace = p.pace;
+        s.autoGoals = !!fd.autoGoals;
+        const lw = latestWeight();
+        if (!lw || (lw.weight !== p.weight)) {
+          // nova trenutna kilaža → upiši mjerenje za danas
+          st.weights = st.weights.filter(w => w.date !== today());
+          st.weights.push({ id: Store.uid(), date: today(), weight: p.weight, bodyFat: null, waist: null, note: '' });
+        }
+        applyGoals(r);
+        Store.save(); toast(`Ciljevi postavljeni: ${fmt(r.kcal, 0)} kcal`);
         break;
       }
       case 'settings': {
         const s = st.settings;
         s.name = fd.name.trim(); s.theme = fd.theme;
-        for (const k of ['height', 'targetWeight', 'workoutsPerWeek', 'kcalGoal', 'proteinGoal', 'carbsGoal', 'fatGoal', 'waterGoal', 'sleepGoal', 'stepsGoal']) s[k] = num(fd[k]);
+        for (const k of ['workoutsPerWeek', 'kcalGoal', 'proteinGoal', 'carbsGoal', 'fatGoal', 'waterGoal', 'sleepGoal', 'stepsGoal']) s[k] = num(fd[k]);
         Store.save(); applyTheme(); toast('Postavke spremljene');
         break;
       }
@@ -1077,6 +1323,8 @@
       renderSuggest(t);
     }
     if (t.matches('[data-grams]')) recalcMeal();
+    const cf = t.closest('form[data-form="calc"]');
+    if (cf) { const p = readCalcForm(cf); document.getElementById('calc-result').innerHTML = calcResultHtml(p, calcGoals(p)); }
   });
   document.addEventListener('focusin', (e) => { if (e.target.matches('[data-search="food"]') && e.target.value.trim() && !ui.selFood) renderSuggest(e.target); });
 

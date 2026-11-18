@@ -15,7 +15,13 @@
       sleepGoal: 8,         // sati
       stepsGoal: 10000,
       workoutsPerWeek: 4,
-      theme: 'auto'
+      theme: 'auto',
+      // Kalkulator ciljeva
+      sex: 'm',
+      age: null,
+      activity: 1.55,
+      pace: 0.5,          // kg tjedno
+      autoGoals: true     // prilagodi kalorije pri svakoj novoj kilaži
     },
     weights: [],   // {id, date, weight, bodyFat, waist, note}
     workouts: [],  // {id, date, type, duration, exercises:[{name, sets:[{reps, weight}]}], notes}
