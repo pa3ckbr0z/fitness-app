@@ -70,6 +70,9 @@
   async function signUp(email, password) {
     const s = await call(`/auth/v1/signup?redirect_to=${encodeURIComponent(redirectUrl())}`, { method: 'POST', body: JSON.stringify({ email, password }) }, false);
     if (s && s.access_token) { setSession(s); await sync(); return { confirmed: true }; }
+    // Supabase za već postojeći e-mail vraća "lažnog" korisnika bez identiteta
+    const ids = s?.identities ?? s?.user?.identities;
+    if (Array.isArray(ids) && ids.length === 0) throw new Error('Taj e-mail je već registriran — upiši lozinku i klikni Prijava.');
     return { confirmed: false };
   }
 
@@ -100,6 +103,7 @@
       const u = await call('/auth/v1/user');
       session.user = { id: u.id, email: u.email }; write(SKEY, session);
       write(BKEY, null);
+      status.notice = '✅ E-mail potvrđen — prijavljen si i podaci se sinkroniziraju.';
       await sync();
     } catch (e) { status.error = e.message; emit(); }
     return true;

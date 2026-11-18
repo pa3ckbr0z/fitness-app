@@ -898,7 +898,7 @@
         <label class="field">E-mail<input type="email" name="email" autocomplete="username" required></label>
         <label class="field" style="margin-top:10px">Lozinka<input type="password" name="password" autocomplete="current-password" minlength="6" required></label>
         <div class="row" style="margin-top:12px"><button class="btn primary" type="submit" value="in">Prijava</button><button class="btn" type="submit" value="up">Registracija</button></div>
-        <div class="hint" id="sync-msg">${Sync.status.error ? '⚠️ ' + esc(Sync.status.error) : 'Prvi put? Upiši e-mail i lozinku (min. 6 znakova) i klikni Registracija.'}</div>
+        <div class="hint" id="sync-msg">${Sync.status.error ? '⚠️ ' + esc(Sync.status.error) : 'Prvi put? Upiši e-mail i lozinku (min. 6 znakova) i klikni Registracija. Već imaš račun? Klikni Prijava.'}</div>
       </form>`;
     return `
       <div class="card">${head}
@@ -1306,9 +1306,9 @@
         (mode === 'up' ? Sync.signUp(email, pass) : Sync.signIn(email, pass))
           .then(r => {
             if (mode === 'up' && r && !r.confirmed) {
-              msg.innerHTML = '✉️ Poslali smo ti e-mail. Klikni link za potvrdu — vratit ćeš se ovdje već prijavljen. (Ako nema maila, provjeri neželjenu poštu.)';
+              msg.innerHTML = '✉️ Poslali smo ti e-mail. <strong>Klikni link u njemu</strong>, a zatim se vrati ovdje i klikni <strong>Prijava</strong>. (Ako nema maila, provjeri neželjenu poštu.)';
               btns.forEach(b => b.disabled = false);
-            } else { toast('Prijavljen — podaci se sinkroniziraju'); render(); }
+            } else { toast('✅ Prijavljen — podaci se sinkroniziraju'); render(); }
           })
           .catch(err => { msg.textContent = '⚠️ ' + err.message; btns.forEach(b => b.disabled = false); });
         return;
@@ -1386,6 +1386,7 @@
 
   if (window.Sync) {
     Sync.onChange((changed) => {
+      if (Sync.status.notice) { toast(Sync.status.notice); Sync.status.notice = null; }
       const el = document.getElementById('sync-status');
       if (el) el.innerHTML = syncStatusText();
       const a = document.activeElement;
