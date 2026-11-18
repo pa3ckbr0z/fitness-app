@@ -202,8 +202,8 @@
     if (!l) return '';
     const sg = suggestSets(name, curSets && num(curSets[0]?.reps) ? curSets : null);
     const s0 = sg?.sets[0];
-    return `Prošli put (${shortDate(l.date)}): <span class="num">${l.sets.map(s => s.weight ? `${s.reps}×${fmt(s.weight)}` : s.reps).join(', ')}</span>
-      ${sg ? `<br><span class="${sg.up ? 'sug' : ''}">Prijedlog: ${sg.sets.length}×${s0.reps}${s0.weight ? ` × ${fmt(s0.weight)} kg` : ''} · ${sg.note}</span>` : ''}
+    return `Prošli put (${shortDate(l.date)}): <span class="num">${l.sets.map(s => s.weight ? `${s.reps}×${fmt(s.weight, 2)}` : s.reps).join(', ')}</span>
+      ${sg ? `<br><span class="${sg.up ? 'sug' : ''}">Prijedlog: ${sg.sets.length}×${s0.reps}${s0.weight ? ` × ${fmt(s0.weight, 2)} kg` : ''} · ${sg.note}</span>` : ''}
       · <a href="#" data-act="filllast" data-i="${i}">učitaj</a>`;
   }
 
@@ -871,7 +871,7 @@
     }
     if (a.protein != null && st.proteinGoal) hl.push(`${a.protein >= st.proteinGoal * 0.9 ? '✅' : '⚠️'} Proteini ${fmt(a.protein, 0)} g dnevno (cilj ${st.proteinGoal} g).`);
     hl.push(`${a.workouts >= st.workoutsPerWeek ? '✅' : isCurrent ? '⏳' : '⚠️'} ${a.workouts} od ${st.workoutsPerWeek} planiranih treninga.`);
-    if (a.prs.length) hl.push(`🏆 Novi rekordi: ${a.prs.map(p => `${esc(p.name)} ${fmt(p.weight)} kg (+${fmt(p.weight - p.prev)})`).join(', ')}.`);
+    if (a.prs.length) hl.push(`🏆 Novi rekordi: ${a.prs.map(p => `${esc(p.name)} ${fmt(p.weight, 2)} kg (+${fmt(p.weight - p.prev, 2)})`).join(', ')}.`);
 
     const label = `${shortDate(ws)} – ${shortDate(addDays(ws, 6))}`;
     return `
@@ -930,7 +930,7 @@
         <div class="row" style="margin-bottom:12px">
           <select data-change="exercise" style="width:auto;max-width:100%">${names.map(n => `<option ${n === ui.exercise ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
           <span class="spacer"></span>
-          ${best ? `<span class="tag accent">🏆 Rekord: ${bodyweight ? best.reps + ' ponavljanja' : fmt(best.max) + ' kg'} · ${shortDate(best.date)}</span>` : ''}
+          ${best ? `<span class="tag accent">🏆 Rekord: ${bodyweight ? best.reps + ' ponavljanja' : fmt(best.max, 2) + ' kg'} · ${shortDate(best.date)}</span>` : ''}
         </div>
         ${Charts.line(series, { unit: bodyweight ? 'pon.' : 'kg' })}
         ${bodyweight ? '' : `<div class="legend" style="margin-top:8px"><span><i style="background:var(--c1)"></i>Najveća težina</span><span><i style="background:var(--c2)"></i>Procijenjeni 1RM</span></div>`}`;
@@ -970,7 +970,7 @@
                   <div class="set-row">
                     <span class="n">${j + 1}</span>
                     <input type="number" min="0" inputmode="numeric" data-ex="${i}" data-set="${j}" data-f="reps" value="${esc(s.reps)}" placeholder="10">
-                    <input type="number" min="0" step="0.5" inputmode="decimal" data-ex="${i}" data-set="${j}" data-f="weight" value="${esc(s.weight)}" placeholder="0">
+                    <input type="number" min="0" step="any" inputmode="decimal" data-ex="${i}" data-set="${j}" data-f="weight" value="${esc(s.weight)}" placeholder="0">
                     <button type="button" class="icon-btn" data-act="rmset" data-i="${i}" data-j="${j}" title="Ukloni set">✕</button>
                   </div>`).join('')}
                 <button type="button" class="btn sm ghost" style="margin-top:8px" data-act="addset" data-i="${i}">+ Set</button>
@@ -997,7 +997,7 @@
                   <span class="muted small">${w.duration ? w.duration + ' min' : ''}</span><span class="spacer"></span>
                   <button class="btn sm ghost" data-act="repeatworkout" data-id="${w.id}" title="Kopiraj u novi trening">↻ Ponovi</button>
                   <button class="icon-btn" data-act="delworkout" data-id="${w.id}" title="Obriši">✕</button></div>
-                ${w.exercises.length ? `<ul>${w.exercises.map(e => `<li><strong style="color:var(--text)">${esc(e.name)}</strong> — ${e.sets.map(s => s.weight ? `${s.reps}×${fmt(s.weight)}` : `${s.reps}`).join(', ')}</li>`).join('')}</ul>` : ''}
+                ${w.exercises.length ? `<ul>${w.exercises.map(e => `<li><strong style="color:var(--text)">${esc(e.name)}</strong> — ${e.sets.map(s => s.weight ? `${s.reps}×${fmt(s.weight, 2)}` : `${s.reps}`).join(', ')}</li>`).join('')}</ul>` : ''}
                 ${w.notes ? `<div class="small muted" style="margin-top:6px">📝 ${esc(w.notes)}</div>` : ''}
               </div>`).join('')}</div>` : `<div class="empty">Još nema spremljenih treninga.</div>`}
           </div>
@@ -1090,7 +1090,7 @@
 
   const gymStepper = (f, label, v, step) => `<div class="stepper">
       <button type="button" data-act="gymstep" data-f="${f}" data-d="${-step}" aria-label="Manje">−</button>
-      <label><input type="number" inputmode="decimal" enterkeyhint="done" step="any" min="0" data-gf="${f}" value="${esc(v ?? '')}" placeholder="0"><span>${label}</span></label>
+      <label><input type="text" inputmode="${f === 'reps' ? 'numeric' : 'decimal'}" enterkeyhint="done" autocomplete="off" data-gf="${f}" value="${v === '' || v == null ? '' : String(v).replace('.', ',')}" placeholder="0"><span>${label}</span></label>
       <button type="button" data-act="gymstep" data-f="${f}" data-d="${step}" aria-label="Više">+</button></div>`;
 
   function renderGym() {
@@ -1101,7 +1101,7 @@
     const l = lastSession(ex.name);
     const sg = suggestSets(ex.name, ex.sets);
     const rest = S().settings.restSec || 90;
-    const fmtW = (w) => (w === '' || w == null) ? '–' : fmt(num(w) || 0);
+    const fmtW = (w) => (w === '' || w == null) ? '–' : fmt(num(w) || 0, 2);
     el.innerHTML = `
       <div class="gym-top">
         <button class="gym-icon" data-act="gymexit" aria-label="Smanji" title="Smanji (trening ostaje u tijeku)">⌄</button>
@@ -1113,15 +1113,19 @@
         <div class="gym-title"><div class="small muted">Vježba ${g.ex + 1} od ${d.exercises.length}</div><h2>${esc(ex.name)}</h2></div>
         <button class="gym-icon" data-act="gymex" data-n="1" ${g.ex === d.exercises.length - 1 ? 'disabled' : ''} aria-label="Sljedeća vježba">›</button>
       </div>
-      ${l ? `<div class="gym-last">Prošli put (${shortDate(l.date)}): ${l.sets.map(x => x.weight ? `${x.reps}×${fmt(x.weight)}` : x.reps).join(', ')}${sg ? `<br><span class="${sg.up ? 'sug' : ''}">${sg.note}</span>` : ''}</div>` : ''}
+      ${l ? `<div class="gym-last">Prošli put (${shortDate(l.date)}): ${l.sets.map(x => x.weight ? `${x.reps}×${fmt(x.weight, 2)}` : x.reps).join(', ')}${sg ? `<br><span class="${sg.up ? 'sug' : ''}">${sg.note}</span>` : ''}</div>` : ''}
       <div class="gym-sets">
         ${ex.sets.map((x, i) => `<button class="gym-set ${i === g.set ? 'cur' : ''} ${x.done ? 'done' : ''}" data-act="gymset" data-i="${i}"><span>Set ${i + 1}</span><b>${x.reps || '–'} × ${fmtW(x.weight)}</b><i>${x.done ? '✓' : ''}</i></button>`).join('')}
         <button class="gym-set add" data-act="gymaddset">+ Set</button>
       </div>
       <div class="gym-edit">
-        ${gymStepper('weight', 'kg', s.weight, S().settings.increment || 2.5)}
+        ${gymStepper('weight', 'kg', s.weight, S().settings.gymStep || 2.5)}
         ${gymStepper('reps', 'ponavljanja', s.reps, 1)}
       </div>
+      <div class="gym-rest"><span class="small muted">Korak za kg:</span>
+        ${[0.25, 0.5, 1, 1.25, 2.5, 5, 10].map(v => `<button class="chipbtn ${(S().settings.gymStep || 2.5) === v ? 'on' : ''}" data-act="gymstepsize" data-v="${v}">${fmt(v, 2)}</button>`).join('')}
+      </div>
+      <div class="small muted" style="text-align:center;margin-top:-6px">Dodirni broj za upis točne težine (npr. 92,25)</div>
       <button class="gym-done ${s.done ? 'is-done' : ''}" data-act="gymdone">${s.done ? '↺ Poništi set' : `✓ Set ${g.set + 1} gotov`}</button>
       <div class="gym-rest"><span class="small muted">Odmor nakon seta:</span>
         ${[60, 90, 120, 180].map(v => `<button class="chipbtn ${rest === v ? 'on' : ''}" data-act="gymrest" data-s="${v}">${mmss(v)}</button>`).join('')}
@@ -1139,7 +1143,7 @@
     const sets = ui.draft.exercises[ui.gym.ex].sets, s = sets[ui.gym.set], old = s[f];
     s[f] = v;
     sets.slice(ui.gym.set + 1).forEach(x => { if (!x.done && String(x[f] ?? '') === String(old ?? '')) x[f] = v; });
-    document.querySelectorAll('.gym-set b').forEach((b, i) => { const x = sets[i]; if (x) b.textContent = `${x.reps || '–'} × ${x.weight === '' || x.weight == null ? '–' : fmt(num(x.weight) || 0)}`; });
+    document.querySelectorAll('.gym-set b').forEach((b, i) => { const x = sets[i]; if (x) b.textContent = `${x.reps || '–'} × ${x.weight === '' || x.weight == null ? '–' : fmt(num(x.weight) || 0, 2)}`; });
   }
 
   /* „Set gotov”: reagira već na dodir (pointerdown), jer na mobitelu prvi dodir
@@ -1155,7 +1159,7 @@
 
   function gymDone() {
     const a = document.activeElement;
-    if (a && a.tagName === 'INPUT') { if (a.dataset.gf) gymSetValue(a.dataset.gf, a.value === '' ? '' : num(a.value)); a.blur(); }
+    if (a && a.tagName === 'INPUT') { if (a.dataset.gf) { const v = num(a.value); if (a.value === '' || v != null) gymSetValue(a.dataset.gf, a.value === '' ? '' : v); } a.blur(); }
     const ex = ui.draft.exercises[ui.gym.ex], s = ex.sets[ui.gym.set];
     if (s.done) { s.done = false; renderGym(); gymPersist(); return; }
     if (!num(s.reps)) {
@@ -1704,6 +1708,7 @@
         renderGym(); gymPersist(); return;
       }
       case 'gymrest': st.settings.restSec = +el.dataset.s; Store.save(); renderGym(); return;
+      case 'gymstepsize': st.settings.gymStep = +el.dataset.v; Store.save(); renderGym(); return;
       case 'gymfinish': {
         const anyDone = ui.draft.exercises.some(e => e.sets.some(s => s.done));
         if (!anyDone && !confirm('Nijedan set nije označen kao gotov. Spremiti sve upisane setove?')) return;
@@ -1988,7 +1993,9 @@
     if (t.closest('form[data-form="workout"]')) syncDraft();
     if (t.dataset.gf && ui.gym) {
       const s = ui.draft.exercises[ui.gym.ex].sets[ui.gym.set];
-      gymSetValue(t.dataset.gf, t.value === '' ? '' : num(t.value));
+      const v = t.value.trim();
+      if (v !== '' && num(v) == null) return; // npr. samo zarez dok tipkaš
+      gymSetValue(t.dataset.gf, v === '' ? '' : num(v));
       gymPersist();
     }
     if (t.matches('[data-f="name"][data-ex]')) { const h = $view.querySelector(`[data-last="${t.dataset.ex}"]`); if (h) h.innerHTML = lastHtml(t.value, t.dataset.ex, ui.draft.exercises[+t.dataset.ex]?.sets); }

@@ -17,7 +17,8 @@
       workoutsPerWeek: 4,
       program: {},        // tjedni plan: { '1': 't1', ... } dan u tjednu (0=ned) → id predloška
       increment: 2.5,     // kg za progresiju
-      restSec: 90,        // odmor nakon seta u načinu za teretanu
+      restSec: 90,
+      gymStep: 2.5,       // korak za −/+ težine u načinu za teretanu        // odmor nakon seta u načinu za teretanu
       theme: 'auto',
       // Kalkulator ciljeva
       sex: 'm',
