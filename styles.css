@@ -410,5 +410,18 @@ body.gym-on .timer { z-index: 70; right: 50%; transform: translateX(50%); bottom
 body.gym-on .timer .t-time { font-size: 2rem; }
 .gym-banner { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; background: var(--accent-soft); border-color: transparent; }
 
+/* Biblioteka treninga */
+.lib-box { width: min(680px, 100%); }
+.lib-cats { margin-bottom: 14px; position: sticky; top: -18px; background: var(--surface); padding: 6px 0; z-index: 1; }
+.lib-list { display: grid; gap: 12px; }
+.lib-item { border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.lib-item h3 { font-size: 1rem; }
+.lib-item p { margin: 6px 0 8px; }
+.lib-days { display: grid; gap: 10px; margin: 10px 0 4px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+.lib-day { background: var(--surface-2); border-radius: 10px; padding: 10px 12px; font-size: .85rem; }
+.lib-day ul { margin: 6px 0 0; padding-left: 16px; color: var(--muted); }
+.lib-day .wd { font-size: .75rem; color: var(--accent); font-weight: 600; }
+.lib-item .tag { margin-left: 4px; }
+
 details summary { cursor: pointer; font-weight: 600; }
 .hint { font-size: .8rem; color: var(--muted); margin-top: 8px; }

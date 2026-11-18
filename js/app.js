@@ -209,7 +209,7 @@
 
   function loadTemplate(t) {
     ui.draft = {
-      date: today(), type: t.type, duration: '', notes: '',
+      date: today(), type: t.type, duration: t.duration || '', notes: t.notes || '',
       exercises: t.exercises.map(ex => {
         const sg = suggestSets(ex.name, ex.sets);
         return { name: ex.name, sets: (sg ? sg.sets : ex.sets).map(s => ({ reps: s.reps, weight: s.weight })) };
@@ -218,6 +218,46 @@
   }
 
   const WD = ['Ned', 'Pon', 'Uto', 'Sri', 'Čet', 'Pet', 'Sub'];
+
+  /* ---------- Biblioteka programa ---------- */
+  function renderLibrary() {
+    let ov = document.getElementById('library');
+    if (!ov) { ov = document.createElement('div'); ov.className = 'modal'; ov.id = 'library'; document.body.appendChild(ov); }
+    const cat = ui.libCat || window.PROGRAM_CATS[0];
+    const mine = new Set(S().templates.map(t => t.name));
+    const list = window.PROGRAMS.filter(p => p.cat === cat);
+    const plural = (n) => n === 1 ? 'trening' : n < 5 ? 'treninga' : 'treninga';
+    ov.innerHTML = `<div class="modal-box lib-box">
+      <div class="card-head"><h2>📚 Biblioteka treninga</h2><button type="button" class="icon-btn" data-act="libclose" aria-label="Zatvori">✕</button></div>
+      <div class="chips lib-cats">${window.PROGRAM_CATS.map(c => `<button type="button" class="chipbtn ${c === cat ? 'on' : ''}" data-act="libcat" data-c="${c}">${c} <span class="muted">${window.PROGRAMS.filter(p => p.cat === c).length}</span></button>`).join('')}</div>
+      <div class="lib-list">${list.map(p => {
+        const added = p.templates.every(t => mine.has(t.name));
+        const dayOf = (i) => (p.schedule || []).filter(([, ti]) => ti === i).map(([wd]) => WD[wd]).join(', ');
+        return `<div class="lib-item">
+          <div class="row"><h3>${esc(p.name)}</h3><span class="spacer"></span><span class="tag">${esc(p.level)}</span><span class="tag accent">${p.perWeek}× tjedno</span></div>
+          <p class="small muted">${esc(p.desc)}</p>
+          <details><summary class="small">Pogledaj vježbe (${p.templates.length} ${plural(p.templates.length)})</summary>
+            <div class="lib-days">${p.templates.map((t, i) => `<div class="lib-day">${dayOf(i) ? `<div class="wd">${dayOf(i)}</div>` : ''}<b>${esc(t.name)}</b>
+              <ul>${t.exercises.map(e => `<li>${esc(e.name)} — ${e.sets.length}×${e.sets[0].reps}</li>`).join('')}</ul></div>`).join('')}</div>
+            ${p.templates[0].notes ? `<p class="hint">ℹ️ ${esc(p.templates[0].notes)}</p>` : ''}
+          </details>
+          <div class="row" style="margin-top:10px">
+            ${p.schedule ? `<button type="button" class="btn sm primary" data-act="libplan" data-id="${p.id}">📅 Dodaj i postavi tjedni plan</button>` : ''}
+            <button type="button" class="btn sm" data-act="libadd" data-id="${p.id}" ${added ? 'disabled' : ''}>${added ? '✓ U tvojim predlošcima' : '+ Dodaj u moje predloške'}</button>
+            ${p.templates.length === 1 ? `<button type="button" class="btn sm ghost" data-act="libstart" data-id="${p.id}">▶ Započni odmah</button>` : ''}
+          </div></div>`;
+      }).join('')}</div></div>`;
+  }
+
+  /** Dodaj predloške programa (postojeće s istim imenom ne duplicira). Vraća id-eve predložaka. */
+  function addProgram(p) {
+    const st = S();
+    return p.templates.map(t => {
+      let ex = st.templates.find(x => x.name === t.name);
+      if (!ex) { ex = { id: Store.uid(), ...structuredClone(t) }; st.templates.push(ex); }
+      return ex.id;
+    });
+  }
   const todayPlan = () => {
     const id = S().settings.program?.[new Date().getDay()];
     return id ? S().templates.find(t => t.id === id) || null : null;
@@ -949,8 +989,9 @@
       <div class="grid grid-2" style="margin-top:16px;align-items:start">
         <form class="card" data-form="workout">
           <div class="card-head"><h2>Novi trening</h2><button type="button" class="btn primary sm" data-act="gymopen">🏋️ Način za teretanu</button></div>
-          ${S().templates.length ? `<div class="chips" style="margin-bottom:14px"><span class="small muted">Predlošci:</span>
-            ${S().templates.map(t => `<span class="chip"><button type="button" data-act="loadtpl" data-id="${t.id}">📋 ${esc(t.name)}</button><button type="button" class="x" data-act="deltpl" data-id="${t.id}" title="Obriši predložak">✕</button></span>`).join('')}</div>` : ''}
+          <div class="chips" style="margin-bottom:14px"><span class="small muted">Predlošci:</span>
+            ${S().templates.map(t => `<span class="chip"><button type="button" data-act="loadtpl" data-id="${t.id}">📋 ${esc(t.name)}</button><button type="button" class="x" data-act="deltpl" data-id="${t.id}" title="Obriši predložak">✕</button></span>`).join('')}
+            <button type="button" class="btn sm" data-act="libopen">📚 Biblioteka (${window.PROGRAMS.length} programa)</button></div>
           <div class="form-grid">
             <label class="field">Datum<input type="date" name="date" value="${d.date}" required></label>
             <label class="field">Vrsta<select name="type">${WORKOUT_TYPES.map(x => `<option ${x === d.type ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
@@ -987,7 +1028,7 @@
           <div class="card"><div class="card-head"><h2>📅 Tjedni plan</h2></div>
             <div class="plan">${[1, 2, 3, 4, 5, 6, 0].map(wd => `<div class="plan-row ${wd === new Date().getDay() ? 'today' : ''}"><span class="wd">${WD[wd]}</span>
               <select data-change="plan" data-wd="${wd}"><option value="">Odmor</option>${S().templates.map(t => `<option value="${t.id}" ${S().settings.program?.[wd] === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></div>`).join('')}</div>
-            <p class="hint">Na Pregledu ćeš svaki dan vidjeti što je na redu. Težine se predlažu same: ako si prošli put odradio sve setove, dodaje se ${fmt(S().settings.increment || 2.5)} kg.</p>
+            <p class="hint">Nemaš plan? <a href="#" data-act="libopen">Odaberi gotov program iz biblioteke</a> i plan se postavi sam. Na Pregledu ćeš svaki dan vidjeti što je na redu. Težine se predlažu same: ako si prošli put odradio sve setove, dodaje se ${fmt(S().settings.increment || 2.5)} kg.</p>
           </div>
           <div class="card"><div class="card-head"><h2>Napredak u vježbi</h2></div>${progressHtml}</div>
           <div class="card"><div class="card-head"><h2>Povijest</h2><span class="muted small">${history.length} ukupno</span></div>
@@ -1625,6 +1666,7 @@
   /* ---------- Događaji ---------- */
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.search-wrap')) hideSuggest();
+    if (e.target.id === 'library') { e.target.remove(); render(); return; }
     const el = e.target.closest('[data-act]');
     if (!el) return;
     const a = el.dataset.act, id = el.dataset.id;
@@ -1679,6 +1721,39 @@
       }
       case 'scan': openScanner(); return;
       case 'gymopen': openGym(); return;
+      case 'libopen': e.preventDefault(); renderLibrary(); return;
+      case 'libclose': document.getElementById('library')?.remove(); render(); return;
+      case 'libcat': {
+        ui.libCat = el.dataset.c; renderLibrary();
+        document.querySelector('#library .modal-box')?.scrollTo({ top: 0 }); return;
+      }
+      case 'libadd': {
+        const p = window.PROGRAMS.find(x => x.id === id);
+        addProgram(p); Store.save();
+        toast(`Dodano: ${p.name} (${p.templates.length} ${p.templates.length === 1 ? 'predložak' : 'predloška'})`);
+        renderLibrary(); return;
+      }
+      case 'libplan': {
+        const p = window.PROGRAMS.find(x => x.id === id);
+        const has = Object.keys(st.settings.program || {}).length;
+        if (has && !confirm(`Zamijeniti tvoj trenutni tjedni plan programom „${p.name}”?`)) return;
+        const ids = addProgram(p);
+        const prog = {};
+        p.schedule.forEach(([wd, ti]) => { prog[wd] = ids[ti]; });
+        st.settings.program = prog; Store.save();
+        document.getElementById('library')?.remove();
+        toast(`📅 Plan postavljen: ${p.name}`);
+        break;
+      }
+      case 'libstart': {
+        const p = window.PROGRAMS.find(x => x.id === id);
+        const [tid] = addProgram(p); Store.save();
+        loadTemplate(st.templates.find(t => t.id === tid));
+        document.getElementById('library')?.remove();
+        if (route() !== 'trening') location.hash = '#/trening';
+        toast(`${p.name} učitan — klikni 🏋️ Način za teretanu`);
+        break;
+      }
       case 'gymexit': closeGym(true); return;
       case 'gymex': ui.gym.ex = Math.max(0, Math.min(ui.draft.exercises.length - 1, ui.gym.ex + +el.dataset.n)); gymFirstUndone(); renderGym(); gymPersist(); return;
       case 'gymset': ui.gym.set = +el.dataset.i; renderGym(); return;
@@ -1825,6 +1900,7 @@
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && document.getElementById('scanner')) { closeScanner(); return; }
+    if (e.key === 'Escape' && document.getElementById('library')) { document.getElementById('library').remove(); render(); return; }
     if (e.key === 'Enter' && e.target.dataset?.gf) { e.preventDefault(); e.target.blur(); return; }
     if (e.target.matches('[data-search="food"]')) {
       const box = document.getElementById('suggest');
